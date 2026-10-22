@@ -14,6 +14,15 @@ npm run build      # dist/ 에 정적 파일 생성
 
 올린 주소를 Edge/Chrome에서 열고 주소창의 **앱 설치**를 누르면 Windows 앱으로, 갤럭시의 Chrome·삼성 인터넷에서 **홈 화면에 추가**하면 휴대폰/태블릿 앱으로 쓸 수 있습니다. 설치 후에는 오프라인에서도 열립니다.
 
+### Windows 실행 파일 (.exe)
+
+`desktop/`에 작은 실행기가 있습니다. 더블클릭하면 Logic Note를 Chrome(없으면 Edge)의 독립된 앱 창으로 엽니다. 브라우저 안에서 열리므로 Google 로그인·Drive 동기화·오프라인이 그대로 동작합니다(앱 전용 내장 브라우저는 Google이 로그인을 막습니다).
+
+```bash
+node desktop/make-icon.mjs          # 로고 → desktop/logo.ico (아이콘을 바꿀 때만)
+pwsh -File desktop/build.ps1        # 바탕 화면에 'Logic Note.exe' 생성
+```
+
 ## 기능
 
 - **캔버스**: 사각형·둥근 사각형·원·마름모·평행사변형·육각형 상자. 가장자리 점을 끌어 다른 상자와 연결하고, 빈 곳에 놓으면 이어지는 상자가 생깁니다.
