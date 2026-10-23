@@ -12,7 +12,7 @@ export const LogicEdge = memo(function LogicEdge(p: EdgeProps<LogicEdgeT>) {
   const editing = useEd((s) => s.editingEdge === p.id)
   const args = { sourceX: p.sourceX, sourceY: p.sourceY, targetX: p.targetX, targetY: p.targetY, sourcePosition: p.sourcePosition, targetPosition: p.targetPosition }
   const [path, lx, ly] =
-    d.kind === 'straight' ? getStraightPath(args) : d.kind === 'step' ? getSmoothStepPath({ ...args, borderRadius: 10 }) : getBezierPath(args)
+    d.kind === 'straight' ? getStraightPath(args) : d.kind === 'step' ? getSmoothStepPath({ ...args, borderRadius: 10, offset: d.offset ?? 20 }) : getBezierPath(args)
   const color = p.selected ? ACCENT : themeMap(d.color ?? INK.light, theme)
   const mid = `ar-${p.id}`
   return (

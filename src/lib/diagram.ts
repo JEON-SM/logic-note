@@ -241,15 +241,53 @@ async function layout(gr: Graph, kind: EdgeData['kind']): Promise<{ nodes: BoxNo
   const idOf = new Map(built.map((b) => [b.n.key, b.id]))
   for (const b of built) dg.setNode(b.id, { width: b.size.w, height: b.size.h })
   const edges0 = gr.edges.filter((e) => e.from !== e.to)
+
+  // 순환(피드백 루프): 코드에 적힌 순서대로 따라가다 되돌아가는 선을 '되먹임 선'으로 정한다.
+  // dagre에는 거꾸로 알려 줘서, 흐름은 위→아래로 유지하고 되먹임 선만 옆으로 돌아가게 한다.
+  const out = new Map<string, number[]>()
+  edges0.forEach((e, i) => out.set(e.from, [...(out.get(e.from) ?? []), i]))
+  const state = new Map<string, number>(), back = new Set<number>()
+  const dfs = (v: string) => {
+    state.set(v, 1)
+    for (const i of out.get(v) ?? []) {
+      const w = edges0[i].to
+      if (state.get(w) === 1) back.add(i)
+      else if (!state.get(w)) dfs(w)
+    }
+    state.set(v, 2)
+  }
+  gr.nodes.forEach((n) => state.get(n.key) || dfs(n.key))
+
+  g2.font = `500 12px ${getComputedStyle(document.body).fontFamily}`
   edges0.forEach((e, i) => {
-    g2.font = `500 12px ${getComputedStyle(document.body).fontFamily}`
     const lw = e.label ? g2.measureText(e.label).width + 16 : 0
-    dg.setEdge(idOf.get(e.from)!, idOf.get(e.to)!, { width: lw, height: e.label ? 20 : 0, labelpos: 'c' }, 'e' + i)
+    const [a, b] = back.has(i) ? [e.to, e.from] : [e.from, e.to]
+    dg.setEdge(idOf.get(a)!, idOf.get(b)!, { width: lw, height: e.label ? 20 : 0, labelpos: 'c' }, 'e' + i)
   })
   dagre.layout(dg)
 
-  const pos = new Map(built.map((b) => { const p = dg.node(b.id); return [b.id, { x: Math.round(p.x), y: Math.round(p.y) }] }))
+  const pos = new Map<string, { x: number; y: number }>(built.map((b) => { const p = dg.node(b.id); return [b.id, { x: Math.round(p.x), y: Math.round(p.y) }] }))
+  const size = new Map<string, { w: number; h: number }>(built.map((b) => [b.id, b.size]))
   const vertical = gr.dir === 'TB' || gr.dir === 'BT'
+
+  /** 되먹임 선: 두 상자의 같은 쪽 면에서 나가 다른 상자들을 비켜 돌아간다. 덜 돌아가는 쪽을 고른다 */
+  let loops = 0
+  const detour = (s: string, t: string) => {
+    const a = pos.get(s)!, b = pos.get(t)!, sa = size.get(s)!, sb = size.get(t)!
+    const [lo, hi] = vertical ? [Math.min(a.y, b.y), Math.max(a.y, b.y)] : [Math.min(a.x, b.x), Math.max(a.x, b.x)]
+    const between = built.filter((n) => { const p = pos.get(n.id)!; const c = vertical ? p.y : p.x; return c >= lo && c <= hi })
+    const edge = (p: { x: number; y: number }, z: { w: number; h: number }, dir: -1 | 1) =>
+      vertical ? p.x + (dir * z.w) / 2 : p.y + (dir * z.h) / 2
+    const need = (dir: -1 | 1) => {
+      const own = dir < 0 ? Math.min(edge(a, sa, -1), edge(b, sb, -1)) : Math.max(edge(a, sa, 1), edge(b, sb, 1))
+      const far = between.reduce((m, n) => { const v = edge(pos.get(n.id)!, n.size, dir); return dir < 0 ? Math.min(m, v) : Math.max(m, v) }, own)
+      return Math.abs(own - far) + 32 + 16 * loops
+    }
+    const lowSide = need(-1) <= need(1)
+    loops++
+    const side = vertical ? (lowSide ? 'l' : 'r') : lowSide ? 't' : 'b'
+    return { side, offset: Math.round(need(lowSide ? -1 : 1) - 16) }
+  }
   const nodes = built.map((b): BoxNode => ({
     id: b.id, type: 'box', position: pos.get(b.id)!, measured: { width: Math.round(b.size.w), height: Math.round(b.size.h) },
     data: {
@@ -257,15 +295,17 @@ async function layout(gr: Graph, kind: EdgeData['kind']): Promise<{ nodes: BoxNo
       fill: b.n.fill ?? null, stroke: b.n.stroke ?? null, strokeWidth: b.n.strokeWidth ?? 1.5, dash: b.n.dash ?? 'solid',
     },
   }))
-  const edges = edges0.map((e): LogicEdge => {
+  const edges = edges0.map((e, i): LogicEdge => {
     const s = idOf.get(e.from)!, t = idOf.get(e.to)!
-    const a = pos.get(s)!, b = pos.get(t)!, dx = b.x - a.x, dy = b.y - a.y
-    const useVertical = vertical ? Math.abs(dx) < 2.5 * Math.abs(dy) || dy !== 0 && Math.abs(dx) < 40 : Math.abs(dy) > 2.5 * Math.abs(dx)
-    const [sh, th] = useVertical ? (dy >= 0 ? ['b', 't'] : ['t', 'b']) : dx >= 0 ? ['r', 'l'] : ['l', 'r']
-    return {
-      id: uid(), type: 'logic', source: s, sourceHandle: sh, target: t, targetHandle: th,
-      data: { ...defaultEdge(), kind, label: e.label, arrow: e.arrow, dashed: e.dashed, width: e.width ?? 1.5, color: e.color ?? null },
+    const style = { ...defaultEdge(), kind, label: e.label, arrow: e.arrow, dashed: e.dashed, width: e.width ?? 1.5, color: e.color ?? null }
+    if (back.has(i)) {
+      const { side, offset } = detour(s, t)
+      return { id: uid(), type: 'logic', source: s, sourceHandle: side, target: t, targetHandle: side, data: { ...style, kind: 'step', offset } }
     }
+    const a = pos.get(s)!, b = pos.get(t)!, dx = b.x - a.x, dy = b.y - a.y
+    const useVertical = vertical ? Math.abs(dx) < 2.5 * Math.abs(dy) : Math.abs(dy) > 2.5 * Math.abs(dx)
+    const [sh, th] = useVertical ? (dy >= 0 ? ['b', 't'] : ['t', 'b']) : dx >= 0 ? ['r', 'l'] : ['l', 'r']
+    return { id: uid(), type: 'logic', source: s, sourceHandle: sh, target: t, targetHandle: th, data: style }
   })
   return { nodes, edges }
 }

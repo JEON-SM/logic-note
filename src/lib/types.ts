@@ -25,6 +25,8 @@ export type EdgeData = {
   color: string | null
   width: number
   label: string
+  /** 되먹임 선이 다른 상자를 비켜 돌아가는 거리(꺾은선) */
+  offset?: number
 }
 
 export type BoxNode = Node<BoxData, 'box'>

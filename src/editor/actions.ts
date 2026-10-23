@@ -70,7 +70,7 @@ export function insertImported({ nodes, edges }: Imported) {
   }
   const dx = target.x - (Math.min(...xs) + w / 2), dy = target.y - (Math.min(...ys) + h / 2)
   const placed = nodes.map((n) => ({ ...n, position: { x: n.position.x + dx, y: n.position.y + dy }, selected: true }))
-  const linked = edges.map((e) => ({ ...e, data: { ...e.data!, kind: edgeStyle.kind } }))
+  const linked = edges.map((e) => (e.data?.offset ? e : { ...e, data: { ...e.data!, kind: edgeStyle.kind } }))
   useEd.setState((s) => ({
     nodes: [...s.nodes.map((n) => (n.selected ? { ...n, selected: false } : n)), ...placed],
     edges: [...s.edges.map((e) => (e.selected ? { ...e, selected: false } : e)), ...linked],
