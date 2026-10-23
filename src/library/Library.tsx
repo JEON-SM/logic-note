@@ -3,6 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import {
   ChevronRight, Copy, Folder as FolderIcon, FolderInput, FolderPlus, Menu as MenuIcon, Moon, MoreVertical, NotebookText,
   Pencil, Plus, RotateCcw, Search, Settings, SortAsc, Star, Sun, Trash2, X,
+  Import,
 } from 'lucide-react'
 import { createFolder, createNote, db, deleteFolder, duplicateNote, emptyTrash, noteText, purgeNote, restoreNote, updateFolder, updateNote } from '../lib/db'
 import { go, setSettings, useSettings, useTheme, type Route } from '../lib/store'
@@ -10,6 +11,7 @@ import type { Folder, Note } from '../lib/types'
 import { cls, IB, Item, Logo, Menu, MenuSep } from '../ui/kit'
 import { confirmDanger, pickFolder, promptText } from '../ui/Dialogs'
 import { openSettings, SyncButton } from '../ui/Settings'
+import { openImport } from '../ui/ImportDialog'
 import { NoteThumb } from './NoteThumb'
 
 const DRAG = 'application/x-ln-note'
@@ -89,6 +91,11 @@ export function Library({ route }: { route: Route }) {
           )}
           <span className="grow" />
           {query === null && <IB label="검색" onClick={() => setQuery('')}><Search size={18} strokeWidth={1.6} /></IB>}
+          {route.name !== 'trash' && (
+            <IB label="AI 도식 가져오기" onClick={() => openImport({ kind: 'new', folderId: route.name === 'folder' ? route.id : null })}>
+              <Import size={18} strokeWidth={1.6} />
+            </IB>
+          )}
           <Menu align="end" trigger={<IB label="정렬"><SortAsc size={18} strokeWidth={1.6} /></IB>}>
             <Item checked={sort === 'updated'} onSelect={() => setSettings({ sort: 'updated' })}>수정한 날짜</Item>
             <Item checked={sort === 'created'} onSelect={() => setSettings({ sort: 'created' })}>만든 날짜</Item>

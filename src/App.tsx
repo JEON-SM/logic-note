@@ -3,6 +3,7 @@ import { useRoute, useTheme } from './lib/store'
 import { Library } from './library/Library'
 import { DialogHost } from './ui/Dialogs'
 import { SettingsDialog } from './ui/Settings'
+import { ImportDialog } from './ui/ImportDialog'
 
 const Editor = lazy(() => import('./editor/Editor'))
 
@@ -20,6 +21,7 @@ export default function App() {
         : <Library route={route} />}
       <DialogHost />
       <SettingsDialog />
+      <ImportDialog />
     </>
   )
 }

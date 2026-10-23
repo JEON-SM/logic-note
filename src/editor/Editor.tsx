@@ -4,7 +4,7 @@ import {
   type Connection, type FinalConnectionState, type Viewport,
 } from '@xyflow/react'
 import { useShallow } from 'zustand/react/shallow'
-import { ArrowLeft, Check, Grid3x3, Maximize, Minus, MoreVertical, Plus, Redo2, Trash2, Undo2 } from 'lucide-react'
+import { ArrowLeft, Check, Grid3x3, Import, Maximize, Minus, MoreVertical, Plus, Redo2, Trash2, Undo2 } from 'lucide-react'
 import { CANVAS } from '../lib/color'
 import { db, updateNote } from '../lib/db'
 import { isUrl } from '../lib/media'
@@ -13,7 +13,7 @@ import { remoteEvents } from '../lib/sync'
 import type { Bg, LogicEdge as LogicEdgeT } from '../lib/types'
 import { IB, Item, Menu, MenuSep } from '../ui/kit'
 import { BGS, SyncButton } from '../ui/Settings'
-import { addChild, insertFiles, insertLink, insertText, setCenterFn } from './actions'
+import { addChild, importDiagramText, insertFiles, insertLink, insertText, looksLikeDiagram, openImportHere, setCenterFn, setFitFn } from './actions'
 import { BoxNode } from './BoxNode'
 import { LogicEdge } from './LogicEdge'
 import { Toolbar } from './Toolbar'
@@ -79,6 +79,7 @@ function TopBar({ id }: { id: string }) {
       </Menu>
       <SyncButton />
       <Menu align="end" trigger={<IB label="더보기"><MoreVertical size={18} strokeWidth={1.6} /></IB>}>
+        <Item icon={<Import size={15} />} onSelect={() => openImportHere()}>AI 도식 가져오기</Item>
         <Item icon={<Check size={15} />} onSelect={() => useSettings.setState({ bg })}>이 배경을 기본으로</Item>
         <MenuSep />
         <Item icon={<Trash2 size={15} />} danger onSelect={async () => { flushSave(); await updateNote(id, { trashed: 1 }); go('#/') }}>노트 삭제</Item>
@@ -99,6 +100,7 @@ function Canvas({ id, viewport }: { id: string; viewport?: Viewport }) {
     return rf.screenToFlowPosition({ x: r.left + r.width / 2, y: r.top + r.height / 2 })
   }, [rf])
   useEffect(() => setCenterFn(center), [center])
+  useEffect(() => setFitFn((ids) => rf.fitView({ nodes: ids.map((id) => ({ id })), padding: 0.2, duration: 300, maxZoom: 1 })), [rf])
 
   // 단축키 · 붙여넣기
   useEffect(() => {
@@ -126,6 +128,7 @@ function Canvas({ id, viewport }: { id: string; viewport?: Viewport }) {
       if (files.length) insertFiles(files)
       else if ((text === CLIP_MARK || !text) && hasClip()) pasteClip()
       else if (isUrl(text)) insertLink(text.trim())
+      else if (looksLikeDiagram(text)) importDiagramText(text)
       else if (text.trim()) insertText(text)
     }
     addEventListener('keydown', onKey)
@@ -179,7 +182,10 @@ function Canvas({ id, viewport }: { id: string; viewport?: Viewport }) {
     e.preventDefault()
     const at = toFlow(e.clientX, e.clientY)
     const files = [...e.dataTransfer.files]
-    if (files.length) return insertFiles(files, at)
+    const diagrams = files.filter((f) => /\.(mmd|mermaid|dot|gv)$/i.test(f.name))
+    for (const f of diagrams) importDiagramText(await f.text())
+    if (files.length > diagrams.length) return insertFiles(files.filter((f) => !diagrams.includes(f)), at)
+    if (diagrams.length) return
     const text = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain')
     if (isUrl(text)) insertLink(text.trim(), at)
     else if (text.trim()) insertText(text, at)

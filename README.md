@@ -34,6 +34,9 @@ pwsh -File desktop/build.ps1        # 바탕 화면에 'Logic Note.exe' 생성
 - **배경**: 모눈, 넓은 모눈, 그리드(점), 넓은 그리드(점), 없음. 노트마다 따로 정하고 기본값도 바꿀 수 있습니다.
 - **다크 모드**: 시스템/라이트/다크. 무채색(검정·회색·흰색)은 모드가 바뀌면 자동으로 반전되고, 글자가 바탕에 묻히면 읽히는 쪽으로 뒤집힙니다. 유채색은 그대로 둡니다.
 - **정리**: 폴더 안에 폴더(트리), 즐겨찾기, 휴지통, 검색, 정렬. 폴더를 누르면 하위 폴더와 노트 미리보기가 카드로 보입니다. 노트 카드를 사이드바 폴더로 끌어다 옮길 수 있습니다.
+- **AI 도식 가져오기**: Claude·ChatGPT 등이 그려 준 Mermaid(flowchart·graph·mindmap)나 Graphviz(DOT) 코드를 상자와 연결선으로 바꿔 자동 배치합니다. 모양·색·점선·라벨도 옮겨 옵니다.
+  - 캔버스에 AI 답변을 그대로 **붙여넣기(Ctrl+V)** 하거나, `.mmd`/`.dot` 파일을 끌어다 놓거나, 편집기 ⋮ 메뉴·노트 목록 상단의 **가져오기** 버튼을 씁니다.
+  - 가져오기 창의 **AI에게 보낼 요청문 복사**로 AI가 바로 가져올 수 있는 형식으로 답하게 할 수 있습니다.
 - **실행 취소/다시 실행**, 복사/붙여넣기, 백업 내보내기·가져오기(JSON).
 
 ### 단축키 (캔버스)
@@ -88,3 +91,5 @@ pwsh -File desktop/build.ps1        # 바탕 화면에 'Logic Note.exe' 생성
 | 아이콘 / 글꼴 | [Lucide](https://lucide.dev) / [Pretendard](https://github.com/orioncactus/pretendard) |
 | 앱 설치·오프라인 | [vite-plugin-pwa](https://vite-pwa-org.netlify.app) |
 | 붙여넣은 HTML 정리 | [DOMPurify](https://github.com/cure53/DOMPurify) |
+| AI 도식 읽기 | [Mermaid](https://mermaid.js.org) 공식 파서, [ts-graphviz](https://github.com/ts-graphviz/ts-graphviz) |
+| 자동 배치 | [dagre](https://github.com/dagrejs/dagre) |

@@ -1,11 +1,15 @@
 import type { XYPosition } from '@xyflow/react'
 import { addMediaFile, isUrl } from '../lib/media'
 import { promptText } from '../ui/Dialogs'
+import { looksLikeDiagram, parseDiagram, type Imported } from '../lib/diagram'
 import type { MediaItem } from '../lib/types'
-import { addBox, addLink, patchNodes, selectedNodes, startEditing, useEd } from './store'
+import { openImport } from '../ui/ImportDialog'
+import { addBox, addLink, commit, patchNodes, selectedNodes, startEditing, useEd } from './store'
 
 let centerFn: () => XYPosition = () => ({ x: 0, y: 0 })
 export const setCenterFn = (f: () => XYPosition) => { centerFn = f }
+let fitFn: (ids: string[]) => void = () => {}
+export const setFitFn = (f: (ids: string[]) => void) => { fitFn = f }
 /** 화면 가운데. 이미 상자가 있으면 조금씩 비켜서 */
 const center = () => {
   const p = centerFn()
@@ -50,3 +54,36 @@ export function addChild() {
   addLink(from.id, 'r', id, 'l', false)
   startEditing(id)
 }
+
+/** 가져온 도식을 지금 노트에 넣는다: 기존 상자와 겹치지 않게 오른쪽에 두고, 그쪽으로 화면을 옮긴다 */
+export function insertImported({ nodes, edges }: Imported) {
+  if (!nodes.length) return
+  commit()
+  const { nodes: cur, edgeStyle } = useEd.getState()
+  const xs = nodes.map((n) => n.position.x), ys = nodes.map((n) => n.position.y)
+  const w = Math.max(...xs) - Math.min(...xs), h = Math.max(...ys) - Math.min(...ys)
+  let target = centerFn()
+  if (cur.length) {
+    const right = Math.max(...cur.map((n) => n.position.x + (n.measured?.width ?? 140) / 2))
+    const cy = cur.reduce((a, n) => a + n.position.y, 0) / cur.length
+    target = { x: right + 160 + w / 2, y: cy }
+  }
+  const dx = target.x - (Math.min(...xs) + w / 2), dy = target.y - (Math.min(...ys) + h / 2)
+  const placed = nodes.map((n) => ({ ...n, position: { x: n.position.x + dx, y: n.position.y + dy }, selected: true }))
+  const linked = edges.map((e) => ({ ...e, data: { ...e.data!, kind: edgeStyle.kind } }))
+  useEd.setState((s) => ({
+    nodes: [...s.nodes.map((n) => (n.selected ? { ...n, selected: false } : n)), ...placed],
+    edges: [...s.edges.map((e) => (e.selected ? { ...e, selected: false } : e)), ...linked],
+    editingId: null, rev: s.rev + 1,
+  }))
+  setTimeout(() => fitFn(placed.map((n) => n.id)), 80)
+}
+
+export const openImportHere = (text = '') => openImport({ kind: 'note', onImport: insertImported }, text)
+
+/** 붙여넣거나 끌어다 놓은 도식 코드: 바로 넣고, 읽지 못하면 가져오기 창에서 이유를 보여준다 */
+export async function importDiagramText(text: string) {
+  try { insertImported(await parseDiagram(text)) } catch { openImportHere(text) }
+}
+
+export { looksLikeDiagram }
