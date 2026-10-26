@@ -4,7 +4,7 @@ import {
   type Connection, type FinalConnectionState, type Viewport,
 } from '@xyflow/react'
 import { useShallow } from 'zustand/react/shallow'
-import { ArrowLeft, Check, Grid3x3, Import, Maximize, Minus, MoreVertical, Plus, Redo2, Trash2, Undo2 } from 'lucide-react'
+import { ArrowLeft, Check, Grid3x3, Import, Maximize, Share, Minus, MoreVertical, Plus, Redo2, Trash2, Undo2 } from 'lucide-react'
 import { CANVAS } from '../lib/color'
 import { db, updateNote } from '../lib/db'
 import { isUrl } from '../lib/media'
@@ -17,6 +17,7 @@ import { addChild, importDiagramText, insertFiles, insertLink, insertText, looks
 import { BoxNode } from './BoxNode'
 import { LogicEdge } from './LogicEdge'
 import { Toolbar } from './Toolbar'
+import { ExportDialog, openExport } from './ExportDialog'
 import {
   CLIP_MARK, addBox, addLink, commit, copySelection, flushSave, hasClip, loadNote, onEdgesChange, onNodesChange, pasteClip, redo,
   startEditing, stopEditing, undo, useEd,
@@ -58,6 +59,7 @@ export default function EditorPage({ id }: { id: string }) {
       <div className="editor">
         <TopBar id={id} />
         <Toolbar />
+        <ExportDialog />
         <Canvas id={id} viewport={ready.viewport} />
       </div>
     </ReactFlowProvider>
@@ -79,6 +81,7 @@ function TopBar({ id }: { id: string }) {
       </Menu>
       <SyncButton />
       <Menu align="end" trigger={<IB label="더보기"><MoreVertical size={18} strokeWidth={1.6} /></IB>}>
+        <Item icon={<Share size={15} />} onSelect={openExport}>내보내기 (그림·코드)</Item>
         <Item icon={<Import size={15} />} onSelect={() => openImportHere()}>AI 도식 가져오기</Item>
         <Item icon={<Check size={15} />} onSelect={() => useSettings.setState({ bg })}>이 배경을 기본으로</Item>
         <MenuSep />

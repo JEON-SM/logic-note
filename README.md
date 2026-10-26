@@ -37,6 +37,7 @@ pwsh -File desktop/build.ps1        # 바탕 화면에 'Logic Note.exe' 생성
 - **AI 도식 가져오기**: Claude·ChatGPT 등이 그려 준 Mermaid(flowchart·graph·mindmap)나 Graphviz(DOT) 코드를 상자와 연결선으로 바꿔 자동 배치합니다. 모양·색·점선·라벨도 옮겨 옵니다.
   - 캔버스에 AI 답변을 그대로 **붙여넣기(Ctrl+V)** 하거나, `.mmd`/`.dot` 파일을 끌어다 놓거나, 편집기 ⋮ 메뉴·노트 목록 상단의 **가져오기** 버튼을 씁니다.
   - 가져오기 창의 **AI에게 보낼 요청문 복사**로 AI가 바로 가져올 수 있는 형식으로 답하게 할 수 있습니다.
+- **내보내기**: 편집기 ⋮ 메뉴 › 내보내기. 노트 전체를 **PNG·SVG 그림**으로 저장하거나 클립보드에 복사하고, **Mermaid·Graphviz 코드**로 복사·저장합니다. Mermaid는 Claude·ChatGPT에 붙여넣으면 구조를 그대로 읽고, Notion·GitHub·Obsidian에서는 그림으로 보이며, Logic Note로 다시 가져올 수도 있습니다.
 - **실행 취소/다시 실행**, 복사/붙여넣기, 백업 내보내기·가져오기(JSON).
 
 ### 단축키 (캔버스)
@@ -93,3 +94,5 @@ pwsh -File desktop/build.ps1        # 바탕 화면에 'Logic Note.exe' 생성
 | 붙여넣은 HTML 정리 | [DOMPurify](https://github.com/cure53/DOMPurify) |
 | AI 도식 읽기 | [Mermaid](https://mermaid.js.org) 공식 파서, [ts-graphviz](https://github.com/ts-graphviz/ts-graphviz) |
 | 자동 배치 | [dagre](https://github.com/dagrejs/dagre) |
+| 그림 내보내기 | [html-to-image](https://github.com/bubkoo/html-to-image) (React Flow 공식 예제 방식) |
+| 코드 내보내기 | Mermaid(직접 생성), Graphviz는 ts-graphviz의 `toDot` |
