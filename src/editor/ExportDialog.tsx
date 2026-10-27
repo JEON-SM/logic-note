@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useReactFlow } from '@xyflow/react'
 import { create } from 'zustand'
 import { CANVAS } from '../lib/color'
-import { captureImage, download, fileName, noteChars, toDotCode, toMermaid } from '../lib/exporter'
+import { captureImage, download, fileName, noteChars, toDotCode, toMermaid, toOutline } from '../lib/exporter'
 import { useTheme } from '../lib/store'
 import { Modal } from '../ui/Dialogs'
 import { cls } from '../ui/kit'
@@ -11,13 +11,24 @@ import { useEd } from './store'
 const useExport = create<{ open: boolean }>(() => ({ open: false }))
 export const openExport = () => useExport.setState({ open: true })
 
-type Code = 'mermaid' | 'dot'
+type Code = 'outline' | 'mermaid' | 'dot'
+const CODES: Record<Code, { label: string; ext: string; help: string }> = {
+  outline: {
+    label: 'AI용 개요', ext: 'txt',
+    help: '연결을 따라 펼친 흐름과 상자마다의 설명을 글로 정리합니다. Claude·ChatGPT에 붙여넣고 질문하면 노트의 논리를 가장 정확하게 읽어요.',
+  },
+  mermaid: {
+    label: 'Mermaid', ext: 'mmd',
+    help: 'AI가 고쳐서 돌려준 코드를 다시 가져올 수 있고, Notion·GitHub·Obsidian에서는 그림으로 보입니다. 상자 제목은 굵게(<b>) 표시돼요.',
+  },
+  dot: { label: 'Graphviz', ext: 'dot', help: 'Graphviz 도구에서 열거나 Logic Note로 다시 가져올 수 있어요. 상자 제목은 굵게(<B>) 표시돼요.' },
+}
 
 export function ExportDialog() {
   const open = useExport((s) => s.open)
   const rf = useReactFlow()
   const theme = useTheme()
-  const [code, setCode] = useState<Code>('mermaid')
+  const [code, setCode] = useState<Code>('outline')
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
@@ -27,8 +38,9 @@ export function ExportDialog() {
 
   useEffect(() => {
     if (!open) return
-    const { nodes, edges } = useEd.getState()
-    if (code === 'mermaid') setText(toMermaid(nodes, edges))
+    const { nodes, edges, title } = useEd.getState()
+    if (code === 'outline') setText(toOutline(title, nodes, edges))
+    else if (code === 'mermaid') setText(toMermaid(nodes, edges))
     else toDotCode(nodes, edges).then(setText)
   }, [open, code])
 
@@ -69,21 +81,18 @@ export function ExportDialog() {
         </div>
       </section>
       <section className="set-sec">
-        <h3>코드</h3>
-        <p className="set-help">
-          Mermaid는 Claude·ChatGPT에 붙여넣으면 AI가 도식 구조를 그대로 읽고, Notion·GitHub·Obsidian에서는 그림으로 보입니다.
-          Logic Note로 다시 가져올 수도 있어요.
-        </p>
+        <h3>글·코드</h3>
         <div className="seg exp-seg">
-          {(['mermaid', 'dot'] as Code[]).map((c) => (
-            <button key={c} type="button" className={cls(code === c && 'on')} onClick={() => setCode(c)}>{c === 'mermaid' ? 'Mermaid' : 'Graphviz'}</button>
+          {(Object.keys(CODES) as Code[]).map((c) => (
+            <button key={c} type="button" className={cls(code === c && 'on')} onClick={() => setCode(c)}>{CODES[c].label}</button>
           ))}
         </div>
-        <textarea className="field imp-code" readOnly value={text} onFocus={(e) => e.target.select()} />
+        <p className="set-help">{CODES[code].help}</p>
+        <textarea className={cls('field imp-code', code === 'outline' && 'exp-prose')} readOnly value={text} onFocus={(e) => e.target.select()} />
         <div className="set-actions">
-          <button className="btn primary" disabled={!text} onClick={run('코드를 복사했어요', () => navigator.clipboard.writeText(text))}>코드 복사</button>
+          <button className="btn primary" disabled={!text} onClick={run('복사했어요', () => navigator.clipboard.writeText(text))}>복사</button>
           <button className="btn" disabled={!text} onClick={run('파일로 저장했어요', async () =>
-            download(new Blob([text], { type: 'text/plain' }), fileName(title, code === 'mermaid' ? 'mmd' : 'dot')))}>파일로 저장</button>
+            download(new Blob([text], { type: 'text/plain;charset=utf-8' }), fileName(title, CODES[code].ext)))}>파일로 저장</button>
         </div>
       </section>
       {msg && <p className={msg.startsWith('실패') ? 'set-error' : 'exp-msg'}>{msg}</p>}

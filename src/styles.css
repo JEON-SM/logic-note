@@ -343,4 +343,5 @@ mark.hl { background: var(--hl); color: inherit; border-radius: 2px; padding: 0 
 .imp-err { color: var(--accent); font-size: 13px; text-align: center; line-height: 1.5; max-width: 90%; word-break: break-word; }
 .imp-info { flex: 1; font-size: 12px; color: var(--text-3); }
 .exp-seg { margin-bottom: 10px; }
+.imp-code.exp-prose { height: 220px; font-family: inherit; font-size: 13px; }
 .exp-msg { margin: 4px 0 0; font-size: 12px; color: var(--text-2); }

@@ -17,6 +17,7 @@ export const AI_PROMPT = `아래 내용을 논리 도식으로 그려줘. 설명
 - 전제·근거는 둥근 상자 A(…), 판단·조건은 마름모 B{…}, 결론은 사각형 C[…]
 - 화살표에 필요하면 라벨을 붙여줘: A -->|이유| B
 - 한 상자 안에서 줄을 바꿀 땐 <br>
+- 상자에 설명을 덧붙일 땐 제목을 굵게 하고 따옴표로 감싸줘: A("<b>제목</b><br>설명")
 
 내용: `
 
@@ -68,19 +69,27 @@ const snapWidth = (w?: string | number) => {
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 const decode = (s: string) =>
-  s.replace(/#quot;/g, '"').replace(/#(\d+);/g, (_, n) => String.fromCharCode(+n))
+  // Mermaid 파서는 #60; #quot; 같은 표기를 ﬂ°°60¶ß, ﬂ°quot¶ß로 바꿔 둔다
+  s.replace(/ﬂ°°(\d+)¶ß/g, '#$1;').replace(/ﬂ°(\w+)¶ß/g, '&$1;')
+    .replace(/#quot;/g, '"').replace(/&?#(\d+);/g, (_, n) => String.fromCharCode(+n))
     .replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')
 
-/** 라벨 → 제목(첫 줄) + 설명(나머지). **굵게**, *기울임* 정도의 마크다운만 살린다 */
+/**
+ * 라벨 → 제목 + 설명. 맨 앞이 <b>…</b>(또는 **…**)이면 그 부분이 제목, 아니면 첫 줄이 제목.
+ * **굵게**, *기울임* 정도의 마크다운만 살린다
+ */
 function labelHtml(text: string, color?: string) {
-  const lines = decode(text).replace(/^["'`]|["'`]$/g, '').split(/<br\s*\/?>|\\n|\n/i)
-    .map((l) => l.replace(/<[^>]+>/g, '').trim()).filter(Boolean)
+  const raw = text.replace(/^(["'`])([\s\S]*)\1$/, '$2')
+  const split = (s: string) => s.split(/<br\b[^>]*>|\\n|\n/i).map((l) => decode(l.replace(/<[^>]+>/g, '')).trim()).filter(Boolean)
+  const bold = raw.match(/^\s*(?:<(b|strong)>([\s\S]*?)<\/\1>|\*\*([\s\S]+?)\*\*)\s*(?:<br\b[^>]*>|\\n|\n|$)([\s\S]*)$/i)
+  const all = split(raw)
+  const [head, rest] = bold ? [split(bold[2] ?? bold[3]), split(bold[4])] : [all.slice(0, 1), all.slice(1)]
   const inline = (l: string) => {
     const h = esc(l).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/(^|[^*])\*(?!\s)(.+?)\*/g, '$1<em>$2</em>').replace(/_(.+?)_/g, '<em>$1</em>')
     return color ? `<span data-tc="${color}" style="${textVars(color)}">${h}</span>` : h
   }
   const para = (l: string) => `<p>${inline(l)}</p>`
-  return { title: lines[0] ? para(lines[0]) : '', body: lines.slice(1).map(para).join('') }
+  return { title: head.map(para).join(''), body: rest.map(para).join('') }
 }
 
 /** 글자 폭으로 상자 크기 추정 (실제 크기는 화면에서 다시 맞춰진다) */
@@ -198,13 +207,17 @@ async function parseDot(code: string): Promise<Graph> {
   for (const e of rawEdges) for (const id of [e.from, e.to]) if (!declared.has(id)) declared.set(id, { attrs: { get: () => undefined }, defaults: root.attributes.node })
 
   const pick = (x: { attrs: Attrs; defaults: Attrs }, k: string) => get(x.attrs, k) ?? get(x.defaults, k)
+  // HTML 라벨(<…>)은 바깥 꺾쇠를 벗기고, 따옴표 라벨은 \" \N \l 같은 이스케이프를 푼다
+  const nodeText = (label: string | undefined, id: string) =>
+    label && /^<[\s\S]*>$/.test(label) ? label.slice(1, -1)
+      : (label ?? id).replace(/\\N/g, id).replace(/\\[lr]/g, '\n').replace(/\\"/g, '"')
   const nodes = [...declared].map(([id, x]): GNode => {
     const style = pick(x, 'style') ?? ''
     const shapeName = pick(x, 'shape') ?? 'ellipse'
     const filled = /filled/.test(style)
     return {
       key: id,
-      text: (pick(x, 'label') ?? id).replace(/\\N/g, id).replace(/\\[lr]/g, '\n'),
+      text: nodeText(pick(x, 'label'), id),
       shape: shapeName === 'box' && /rounded/.test(style) ? 'round' : DOT_SHAPES[shapeName] ?? 'rect',
       fill: toHex(pick(x, 'fillcolor') ?? (filled ? pick(x, 'color') : undefined)),
       stroke: filled && !pick(x, 'fillcolor') ? undefined : toHex(pick(x, 'color')),

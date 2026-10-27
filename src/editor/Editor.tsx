@@ -81,7 +81,7 @@ function TopBar({ id }: { id: string }) {
       </Menu>
       <SyncButton />
       <Menu align="end" trigger={<IB label="더보기"><MoreVertical size={18} strokeWidth={1.6} /></IB>}>
-        <Item icon={<Share size={15} />} onSelect={openExport}>내보내기 (그림·코드)</Item>
+        <Item icon={<Share size={15} />} onSelect={openExport}>내보내기 (그림·AI용 글·코드)</Item>
         <Item icon={<Import size={15} />} onSelect={() => openImportHere()}>AI 도식 가져오기</Item>
         <Item icon={<Check size={15} />} onSelect={() => useSettings.setState({ bg })}>이 배경을 기본으로</Item>
         <MenuSep />

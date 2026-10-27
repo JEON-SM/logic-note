@@ -40,6 +40,17 @@ export const isAchromatic = (hex: string) => {
 }
 export const invert = (hex: string) => rgbToHex(hexToRgb(hex).map((v) => 255 - v))
 
+/** 사람이 부르는 색 이름 (AI용 개요에서 같은 색끼리 알아보게) */
+export function colorName(hex: string) {
+  const [r, g, b] = hexToRgb(hex).map((v) => v / 255)
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), c = max - min, l = (max + min) / 2
+  const tone = l > 0.8 ? '연한 ' : l < 0.3 ? '진한 ' : ''
+  if (isAchromatic(hex)) return l < 0.12 ? '검정' : l > 0.97 ? '흰색' : tone + '회색'
+  const h = ((max === r ? (g - b) / c : max === g ? (b - r) / c + 2 : (r - g) / c + 4) * 60 + 360) % 360
+  const name = h < 15 || h >= 335 ? '빨강' : h < 40 ? '주황' : h < 65 ? '노랑' : h < 160 ? '초록' : h < 190 ? '청록' : h < 250 ? '파랑' : h < 290 ? '보라' : '분홍'
+  return tone + name
+}
+
 /** 무채색은 다크 모드에서 명도를 반전해 표시한다 (채도가 있는 색은 그대로). 자기 역함수. */
 export const themeMap = (c: string, theme: Theme) => (theme === 'dark' && isAchromatic(c) ? invert(c) : c)
 
