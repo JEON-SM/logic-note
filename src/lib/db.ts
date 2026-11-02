@@ -1,5 +1,5 @@
 import Dexie, { type EntityTable } from 'dexie'
-import type { Folder, LinkMeta, Note } from './types'
+import type { Folder, LinkMeta, Note, Paper } from './types'
 
 export interface MediaRec { id: string; blob: Blob; type: string; driveId?: string }
 export interface PreviewRec { url: string; data: LinkMeta | null; at: number }
@@ -60,9 +60,9 @@ export async function deleteFolder(id: string) {
 /** 이번에 '새 노트'로 만든 노트. 아무것도 안 하고 나가면 지운다 */
 export const freshNotes = new Set<string>()
 
-export async function createNote(folderId: string | null) {
+export async function createNote(folderId: string | null, paper: Paper | null = null) {
   const t = Date.now()
-  const n: Note = { id: uid(), folderId, title: '', nodes: [], edges: [], createdAt: t, updatedAt: t, dirty: 1 }
+  const n: Note = { id: uid(), folderId, title: '', nodes: [], edges: [], ...(paper && { paper }), createdAt: t, updatedAt: t, dirty: 1 }
   await db.notes.add(n)
   changed()
   return n

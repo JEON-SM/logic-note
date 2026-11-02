@@ -4,36 +4,48 @@ import {
   type Connection, type FinalConnectionState, type Viewport,
 } from '@xyflow/react'
 import { useShallow } from 'zustand/react/shallow'
-import { ArrowLeft, Check, Grid3x3, Import, Maximize, Share, Minus, MoreVertical, Palette, Plus, Redo2, Trash2, Undo2 } from 'lucide-react'
+import { ArrowLeft, Check, Files, Grid3x3, Import, Infinity as InfinityIcon, Maximize, Share, Minus, MoreVertical, Palette, Plus, RectangleHorizontal, RectangleVertical, Redo2, Trash2, Undo2 } from 'lucide-react'
 import { CANVAS } from '../lib/color'
 import { db, freshNotes, purgeNote, updateNote } from '../lib/db'
 import { isUrl } from '../lib/media'
 import { go, useSettings, useTheme } from '../lib/store'
+import { pageSize, pagesHeight } from '../lib/pages'
+import { isMemo } from '../lib/shapes'
 import { remoteEvents } from '../lib/sync'
 import type { Bg, LogicEdge as LogicEdgeT } from '../lib/types'
-import { IB, Item, Menu, MenuSep } from '../ui/kit'
+import { IB, Item, Menu, MenuSep, Segmented } from '../ui/kit'
 import { BGS, SyncButton } from '../ui/Settings'
 import { toast } from '../ui/Toast'
 import { addChild, importDiagramText, insertFiles, insertLink, insertText, looksLikeDiagram, openImportHere, setCenterFn, setFitFn } from './actions'
 import { BoxNode } from './BoxNode'
+import { CanvasMenu } from './CanvasMenu'
 import { DefaultsDialog, openDefaults } from './DefaultsDialog'
 import { LogicEdge } from './LogicEdge'
 import { Toolbar } from './Toolbar'
 import { ExportDialog, openExport } from './ExportDialog'
+import { PageIndicator, PageSorter, PagesLayer, openPages, usePageNav } from './Pages'
 import {
-  CLIP_MARK, addBox, addLink, commit, copySelection, dragOver, finishDrag, flushSave, groupSelection, hasClip, loadNote, onEdgesChange,
-  onNodesChange, pasteClip, redo, selectedNodes, startDrag, startEditing, stopEditing, takeOut, undo, useEd,
+  CLIP_MARK, addBox, addLink, canHold, commit, copySelection, cutSelection, dragOver, effDefaults, finishDrag, flushSave, groupSelection, hasClip,
+  loadNote, moveInto, onEdgesChange, onNodesChange, paperKind, pasteClip, redo, selectedNodes, setPaper, startDrag, startEditing, stopEditing, takeOut,
+  undo, useEd, type PaperKind,
 } from './store'
 
 const nodeTypes = { box: BoxNode }
 const edgeTypes = { logic: LogicEdge }
-const BG: Record<Bg, { variant: BackgroundVariant; gap: number; size?: number } | null> = {
+const BG: Record<Bg, { variant: BackgroundVariant; gap: number | [number, number]; size?: number } | null> = {
   grid: { variant: BackgroundVariant.Lines, gap: 24 },
   'grid-wide': { variant: BackgroundVariant.Lines, gap: 48 },
   dots: { variant: BackgroundVariant.Dots, gap: 24, size: 1.6 },
   'dots-wide': { variant: BackgroundVariant.Dots, gap: 48, size: 1.8 },
+  // 가로줄만: 세로줄 간격을 아주 넓혀 사실상 보이지 않게
+  lines: { variant: BackgroundVariant.Lines, gap: [100000, 28] },
   none: null,
 }
+const PAPERS: { id: PaperKind; label: string; icon: React.ReactNode }[] = [
+  { id: 'canvas', label: '무한 캔버스', icon: <InfinityIcon size={15} /> },
+  { id: 'a4', label: 'A4 세로', icon: <RectangleVertical size={15} /> },
+  { id: 'a4-land', label: 'A4 가로', icon: <RectangleHorizontal size={15} /> },
+]
 const isEditable = (t: EventTarget | null) => t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))
 const OPPOSITE: Record<string, string> = { t: 'b', b: 't', l: 'r', r: 'l' }
 const openIds = new Set<string>()
@@ -79,6 +91,7 @@ export default function EditorPage({ id }: { id: string }) {
         <Toolbar />
         <ExportDialog />
         <DefaultsDialog />
+        <PageSorter />
         <Canvas id={id} viewport={ready.viewport} />
       </div>
     </ReactFlowProvider>
@@ -86,8 +99,15 @@ export default function EditorPage({ id }: { id: string }) {
 }
 
 function TopBar({ id }: { id: string }) {
-  const { title, bg, canUndo, canRedo } = useEd(useShallow((s) => ({ title: s.title, bg: s.bg, canUndo: s.past.length > 0, canRedo: s.future.length > 0 })))
+  const { title, bg, paper, canUndo, canRedo } = useEd(useShallow((s) => ({
+    title: s.title, bg: s.bg, paper: s.paper, canUndo: s.past.length > 0, canRedo: s.future.length > 0,
+  })))
   const back = () => { flushSave(); history.length > 1 ? history.back() : go('#/') }
+  const toPage = usePageNav()
+  const choosePaper = (k: PaperKind) => {
+    if (setPaper(k)) toast('용지보다 넓은 내용이 있어요. A4 가로로 바꾸거나 상자를 옮겨 주세요')
+    if (k !== 'canvas') requestAnimationFrame(() => toPage(0))
+  }
   return (
     <header className="bar editor-bar">
       <IB label="뒤로" onClick={back}><ArrowLeft size={20} strokeWidth={1.6} /></IB>
@@ -95,6 +115,7 @@ function TopBar({ id }: { id: string }) {
         onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()} />
       <IB label="실행 취소 (Ctrl+Z)" disabled={!canUndo} onClick={undo}><Undo2 size={18} strokeWidth={1.6} /></IB>
       <IB label="다시 실행 (Ctrl+Y)" disabled={!canRedo} onClick={redo}><Redo2 size={18} strokeWidth={1.6} /></IB>
+      {paper && <IB label="페이지 정렬" onClick={openPages}><Files size={18} strokeWidth={1.6} /></IB>}
       <Menu align="end" trigger={<IB label="배경"><Grid3x3 size={18} strokeWidth={1.6} /></IB>}>
         {BGS.map((b) => <Item key={b.id} checked={bg === b.id} onSelect={() => useEd.setState({ bg: b.id })}>{b.label}</Item>)}
       </Menu>
@@ -103,6 +124,10 @@ function TopBar({ id }: { id: string }) {
         <Item icon={<Share size={15} />} onSelect={openExport}>내보내기 (그림·AI용 글·코드)</Item>
         <Item icon={<Import size={15} />} onSelect={() => openImportHere()}>AI 도식 가져오기</Item>
         <Item icon={<Palette size={15} />} onSelect={openDefaults}>기본 모양 (새 상자·선)</Item>
+        <MenuSep />
+        {PAPERS.map((p) => <Item key={p.id} icon={p.icon} checked={paperKind(paper) === p.id} onSelect={() => choosePaper(p.id)}>{p.label}</Item>)}
+        {paper && <Item icon={<Files size={15} />} onSelect={openPages}>페이지 정렬 (추가·삭제·순서)</Item>}
+        <MenuSep />
         <Item icon={<Check size={15} />} onSelect={() => useSettings.setState({ bg })}>이 배경을 기본으로</Item>
         <MenuSep />
         <Item icon={<Trash2 size={15} />} danger onSelect={async () => { flushSave(); await updateNote(id, { trashed: 1 }); go('#/') }}>노트 삭제</Item>
@@ -115,8 +140,18 @@ function Canvas({ id, viewport }: { id: string; viewport?: Viewport }) {
   const theme = useTheme()
   const rf = useReactFlow()
   const wrap = useRef<HTMLDivElement>(null)
-  const { nodes, edges, bg, tool, shape } = useEd(useShallow((s) => ({ nodes: s.nodes, edges: s.edges, bg: s.bg, tool: s.tool, shape: s.shape })))
-  const [fitOnOpen] = useState(() => !viewport && nodes.length > 0)
+  const { nodes, edges, bg, tool, shape, paper, picking } = useEd(useShallow((s) => ({
+    nodes: s.nodes, edges: s.edges, bg: s.bg, tool: s.tool, shape: s.shape, paper: s.paper, picking: s.picking,
+  })))
+  const [fitOnOpen] = useState(() => !viewport && nodes.length > 0 && !useEd.getState().paper)
+  // 용지 노트를 처음 열면 첫 페이지를 화면 폭에 맞춰
+  const [startView] = useState(() => {
+    const p = useEd.getState().paper
+    if (viewport || !p) return viewport ?? { x: innerWidth / 2, y: innerHeight / 3, zoom: 1 }
+    const zoom = Math.min(1, (innerWidth - 48) / pageSize(p).w)
+    return { x: (innerWidth - pageSize(p).w * zoom) / 2, y: 24, zoom }
+  })
+  const toPage = usePageNav()
 
   const center = useCallback(() => {
     const r = wrap.current!.getBoundingClientRect()
@@ -133,6 +168,7 @@ function Canvas({ id, viewport }: { id: string; viewport?: Viewport }) {
       if (mod && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo() }
       else if (mod && k === 'y') { e.preventDefault(); redo() }
       else if (mod && k === 'c') { if (copySelection()) navigator.clipboard?.writeText(CLIP_MARK).catch(() => {}) }
+      else if (mod && k === 'x') { if (cutSelection()) navigator.clipboard?.writeText(CLIP_MARK).catch(() => {}) }
       else if (mod && k === 'd') { e.preventDefault(); if (copySelection()) pasteClip() }
       else if (mod && k === 'a') { e.preventDefault(); useEd.setState((s) => ({ nodes: s.nodes.map((n) => ({ ...n, selected: true })) })) }
       else if (mod && k === 'g') { e.preventDefault(); e.shiftKey ? takeOut(selectedNodes().map((n) => n.id)) : groupSelection() }
@@ -141,6 +177,7 @@ function Canvas({ id, viewport }: { id: string; viewport?: Viewport }) {
         const sel = useEd.getState().nodes.filter((n) => n.selected)
         if (sel.length === 1) { e.preventDefault(); startEditing(sel[0].id) }
       } else if (e.key === 'Escape') {
+        if (useEd.getState().picking) return useEd.setState({ picking: null, dropTarget: null })
         useEd.setState((s) => ({ tool: s.tool === 'place' ? 'hand' : s.tool, nodes: s.nodes.map((n) => (n.selected ? { ...n, selected: false } : n)) }))
       }
     }
@@ -189,24 +226,25 @@ function Canvas({ id, viewport }: { id: string; viewport?: Viewport }) {
     useEd.setState((s) => ({ edges: reconnectEdge(old, c, s.edges, { shouldReplaceId: false }), rev: s.rev + 1 }))
   }, [])
 
+  // 메모지는 한 번 놓고 나면 다시 보통 상자로 (두 번 눌러 만드는 건 늘 상자)
+  const placed = (nid: string) => {
+    useEd.setState({ tool: 'hand', ...(isMemo(shape) && { shape: effDefaults().shape }) })
+    startEditing(nid)
+  }
   const onPaneClick = (e: React.MouseEvent) => {
     useEd.setState({ editingEdge: null })
+    if (useEd.getState().picking) return useEd.setState({ picking: null, dropTarget: null })
     if (useEd.getState().editingId) return stopEditing()
-    if (tool === 'place') {
-      const nid = addBox(toFlow(e.clientX, e.clientY), shape)
-      useEd.setState({ tool: 'hand' })
-      startEditing(nid)
-    }
+    if (tool === 'place') placed(addBox(toFlow(e.clientX, e.clientY), shape))
   }
   const onDoubleClick = (e: React.MouseEvent) => {
     if (!(e.target as HTMLElement).classList.contains('react-flow__pane')) return
-    startEditing(addBox(toFlow(e.clientX, e.clientY), shape))
+    startEditing(addBox(toFlow(e.clientX, e.clientY), isMemo(shape) ? effDefaults().shape : shape))
   }
   // 집합 안의 빈 곳을 두 번 누르거나, 도형을 고른 채 상자를 누르면 그 안에 새 상자
   const addInside = (e: React.MouseEvent, parent: string) => {
-    const nid = addBox(toFlow(e.clientX, e.clientY), shape, { parent })
-    useEd.setState({ tool: 'hand' })
-    startEditing(nid)
+    if (!canHold(parent, [])) return
+    placed(addBox(toFlow(e.clientX, e.clientY), tool === 'place' ? shape : isMemo(shape) ? effDefaults().shape : shape, { parent }))
   }
   const onNodeDoubleClick = (e: React.MouseEvent, id: string) => {
     const onText = (e.target as HTMLElement).closest('.box-content')
@@ -226,15 +264,19 @@ function Canvas({ id, viewport }: { id: string; viewport?: Viewport }) {
     else if (text.trim()) insertText(text, at)
   }
 
-  const pattern = BG[bg]
+  const pattern = paper ? null : BG[bg]
+  const ps = paper && pageSize(paper)
   return (
-    <div className={`canvas tool-${tool}`} ref={wrap} onDoubleClick={onDoubleClick} onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
+    <CanvasMenu>
+    <div className={`canvas tool-${tool}${picking ? ' picking' : ''}${paper ? ' paper' : ''}`} ref={wrap} onDoubleClick={onDoubleClick} onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
       <ReactFlow
         nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes}
         onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} onConnectEnd={onConnectEnd} onReconnect={onReconnect}
         nodeOrigin={[0.5, 0.5]} connectionMode={ConnectionMode.Loose} connectionRadius={32}
-        defaultViewport={viewport ?? { x: innerWidth / 2, y: innerHeight / 3, zoom: 1 }} fitView={fitOnOpen} fitViewOptions={{ padding: 0.25, maxZoom: 1 }}
-        panOnDrag={tool === 'select' ? [1, 2] : true} selectionOnDrag={tool === 'select'} selectionMode={SelectionMode.Partial}
+        defaultViewport={startView} fitView={fitOnOpen} fitViewOptions={{ padding: 0.25, maxZoom: 1 }}
+        translateExtent={ps ? [[-ps.w * 1.5, -ps.h], [ps.w * 2.5, pagesHeight(paper!) + ps.h]] : undefined}
+        nodesDraggable={!picking}
+        panOnDrag={tool === 'select' ? [1] : true} selectionOnDrag={tool === 'select'} selectionMode={SelectionMode.Partial}
         panOnScroll={false} zoomOnDoubleClick={false} minZoom={0.1} maxZoom={4}
         deleteKeyCode={['Backspace', 'Delete']} multiSelectionKeyCode={['Shift', 'Meta', 'Control']}
         onBeforeDelete={async () => { commit(); return true }}
@@ -247,9 +289,13 @@ function Canvas({ id, viewport }: { id: string; viewport?: Viewport }) {
         onSelectionDragStop={(_, ns) => finishDrag(ns.map((n) => n.id))}
         onNodeDoubleClick={(e, n) => onNodeDoubleClick(e, n.id)}
         onNodeClick={(e, n) => {
+          const pick = useEd.getState().picking
+          if (pick) return canHold(n.id, pick) ? moveInto(pick, n.id) : toast('여기에는 넣을 수 없어요')
           if (tool === 'place') return addInside(e, n.id)
           if (useEd.getState().editingId !== n.id) stopEditing()
         }}
+        onNodeMouseEnter={(_, n) => { const pick = useEd.getState().picking; if (pick) useEd.setState({ dropTarget: canHold(n.id, pick) ? n.id : null }) }}
+        onNodeMouseLeave={() => { if (useEd.getState().picking) useEd.setState({ dropTarget: null }) }}
         onEdgeDoubleClick={(_, ed) => useEd.setState({ editingEdge: ed.id })}
         onPaneClick={onPaneClick}
         onMoveEnd={(_, vp) => updateNote(id, { viewport: vp }, false)}
@@ -259,13 +305,30 @@ function Canvas({ id, viewport }: { id: string; viewport?: Viewport }) {
           <Background variant={pattern.variant} gap={pattern.gap} size={pattern.size} lineWidth={1}
             color={theme === 'dark' ? '#323236' : '#ECECEA'} bgColor={CANVAS[theme]} />
         )}
-        {!pattern && <Background variant={BackgroundVariant.Dots} gap={1000} size={0} bgColor={CANVAS[theme]} />}
+        {!pattern && <Background variant={BackgroundVariant.Dots} gap={1000} size={0} bgColor={paper ? DESK[theme] : CANVAS[theme]} />}
+        {paper && <PagesLayer paper={paper} bg={bg} />}
       </ReactFlow>
-      {!nodes.length && <div className="hint">빈 곳을 두 번 눌러 상자 만들기</div>}
+      {!nodes.length && (
+        <div className="empty-note">
+          <div className="hint">빈 곳을 두 번 눌러 상자 만들기</div>
+          <Segmented value={paperKind(paper)} options={PAPERS} onChange={(k) => { setPaper(k); if (k !== 'canvas') requestAnimationFrame(() => toPage(0, 0)) }} />
+        </div>
+      )}
+      {picking && (
+        <div className="pick-bar">
+          넣을 상자를 누르세요
+          <button type="button" className="btn" onClick={() => useEd.setState({ picking: null, dropTarget: null })}>취소</button>
+        </div>
+      )}
+      {paper && <PageIndicator paper={paper} />}
       <ZoomPanel />
     </div>
+    </CanvasMenu>
   )
 }
+
+/** 용지 노트에서 종이 바깥(책상) 색 */
+const DESK = { light: '#ECECE9', dark: '#0C0C0D' } as const
 
 function ZoomPanel() {
   const rf = useReactFlow()

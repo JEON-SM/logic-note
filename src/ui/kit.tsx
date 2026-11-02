@@ -1,5 +1,5 @@
 import { useState, type ReactNode, type ButtonHTMLAttributes } from 'react'
-import { DropdownMenu, Popover } from 'radix-ui'
+import { ContextMenu, DropdownMenu, Popover } from 'radix-ui'
 import { Check } from 'lucide-react'
 import { HexColorInput, HexColorPicker } from 'react-colorful'
 import { PALETTE, themeMap } from '../lib/color'
@@ -84,6 +84,16 @@ export const Item = ({ icon, children, onSelect, danger, checked }: { icon?: Rea
   </DropdownMenu.Item>
 )
 export const MenuSep = () => <DropdownMenu.Separator className="menu-sep" />
+
+/** 오른쪽 클릭 메뉴용 (모양은 Menu와 같음) */
+export const CItem = ({ icon, children, onSelect, danger, hint, disabled }: { icon?: ReactNode; children: ReactNode; onSelect: () => void; danger?: boolean; hint?: string; disabled?: boolean }) => (
+  <ContextMenu.Item className={cls('menu-item', danger && 'danger')} onSelect={onSelect} disabled={disabled}>
+    <span className="menu-icon">{icon}</span>
+    <span className="menu-text">{children}</span>
+    {hint && <span className="menu-hint">{hint}</span>}
+  </ContextMenu.Item>
+)
+export const CSep = () => <ContextMenu.Separator className="menu-sep" />
 
 export function Pop({ trigger, children }: { trigger: ReactNode; children: ReactNode }) {
   return (

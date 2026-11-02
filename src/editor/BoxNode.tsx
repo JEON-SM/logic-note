@@ -1,14 +1,15 @@
-import { memo, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type PointerEvent } from 'react'
-import { Handle, Position, useStore, type NodeProps } from '@xyflow/react'
+import { memo, useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from 'react'
+import { Handle, NodeResizer, Position, type NodeProps } from '@xyflow/react'
 import { EditorContent, useEditor } from '@tiptap/react'
+import { animate } from 'motion/react'
 import { Play, X } from 'lucide-react'
 import { ACCENT, CANVAS, INK, SURFACE, readable, themeMap, toneOf } from '../lib/color'
 import { useMediaUrl, usePreview, youtubeId } from '../lib/media'
 import { htmlOf, markdownPaste, richExtensions, sanitize, linksIn } from '../lib/rich'
-import { outerSize, shapePath } from '../lib/shapes'
+import { MEMO, innerSize, isMemo, outerSize, shapePath } from '../lib/shapes'
 import { useTheme } from '../lib/store'
 import type { BoxData, BoxNode as BoxNodeT, MediaItem } from '../lib/types'
-import { patchNodes, reportHead, stopEditing, useEd } from './store'
+import { commit, patchNodes, reportHead, stopEditing, useEd } from './store'
 
 const SIDES = [
   { id: 't', pos: Position.Top }, { id: 'r', pos: Position.Right },
@@ -17,12 +18,18 @@ const SIDES = [
 const MAX_W = 260
 /** 한 겹 더 감쌀 때마다 테두리를 이만큼 두껍게 (바깥일수록 두꺼움) */
 const LEVEL_W = 1.5
+const near = (a: number, b: number) => Math.abs(a - b) < 0.5
+type Shown = { x: number; y: number; w: number; h: number; top: number; set: boolean }
 
 export const BoxNode = memo(function BoxNode({ id, data, selected }: NodeProps<BoxNodeT>) {
   const theme = useTheme()
   const editing = useEd((s) => s.editingId === id)
   const frame = useEd((s) => s.frames[id])
   const dropping = useEd((s) => s.dropTarget === id)
+  // 하나만 골랐을 때만 크기 손잡이를 보인다
+  const solo = useEd((s) => selected && s.nodes.reduce((k, n) => k + (n.selected ? 1 : 0), 0) === 1)
+  const center = useEd((s) => s.nodes.find((n) => n.id === id)?.position)
+  const box = useRef<HTMLDivElement>(null)
   const content = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ w: 60, h: 20 })
 
@@ -37,34 +44,114 @@ export const BoxNode = memo(function BoxNode({ id, data, selected }: NodeProps<B
     return () => ro.disconnect()
   }, [id])
 
-  // 집합(안에 상자가 있음): 크기는 안쪽 상자들로 정해지고, 글은 위쪽 머리글로
-  const { w, h } = frame ?? outerSize(data.shape, size.w, size.h)
+  const memoKind = isMemo(data.shape)
+  const natural = outerSize(data.shape, size.w, size.h)
+  // 글 폭: 직접 정한 상자 폭 안쪽 → 예전 방식의 고정 폭 → 메모지 기본 폭 → 아니면 최대 폭까지 자동
+  const textW = frame ? null
+    : data.w ? Math.max(24, Math.floor(innerSize(data.shape, data.w, data.h ?? natural.h).w))
+    : data.wrap ?? (memoKind ? MEMO.w - MEMO.pad * 2 : null)
+  // 집합은 틀 크기, 아니면 직접 정한 크기(글이 더 많으면 그만큼 더)
+  const w = frame?.w ?? Math.max(data.w ?? 0, natural.w)
+  const h = frame?.h ?? Math.max(data.h ?? 0, natural.h)
   const fill = data.fill ? themeMap(data.fill, theme) : frame ? 'transparent' : SURFACE[theme]
   const stroke = data.stroke ? themeMap(data.stroke, theme) : INK[theme]
   const sw = data.strokeWidth + (frame ? frame.level * LEVEL_W : 0)
   const tone = toneOf(fill === 'transparent' ? CANVAS[theme] : fill)
   const d = shapePath(data.shape, w, h)
   const empty = !data.title && !data.body && !data.media.length
+  const fold = Math.min(MEMO.fold, w / 3, h / 3)
+
+  useFrameMotion(id, box, center, { w, h, top: frame?.top ?? 0, set: !!frame }, data.shape)
+  // 집합에 들어가거나 나오면 살짝 튀어 자리 잡는다
+  const parent = useRef(data.parent ?? null)
+  useEffect(() => {
+    if (parent.current === (data.parent ?? null)) return
+    parent.current = data.parent ?? null
+    if (box.current && !reduced()) animate(box.current, { scale: [1.06, 1] }, { duration: 0.32, ease: [0.22, 1, 0.36, 1] })
+  }, [data.parent])
 
   return (
-    <div className={`box tone-${tone}${frame ? ' set' : ''}`} style={{ width: w, height: h, ['--ink' as string]: readable('#1C1C1E', fill === 'transparent' ? CANVAS[theme] : fill) }}>
+    <div ref={box} className={`box tone-${tone}${frame ? ' set' : ''}${memoKind ? ' memo' : ''}`}
+      style={{ width: w, height: h, ['--ink' as string]: readable('#1C1C1E', fill === 'transparent' ? CANVAS[theme] : fill) }}
+      onDoubleClick={(e) => {
+        // 크기 손잡이를 두 번 누르면 자동 크기로
+        if (!(e.target as Element).closest('.react-flow__resize-control')) return
+        e.stopPropagation()
+        patchNodes([id], { w: null, h: null, wrap: null })
+      }}>
       <svg className="box-shape" width={w} height={h}>
-        {selected && <path d={d} fill="none" stroke={ACCENT} strokeOpacity={0.35} strokeWidth={sw + 5} strokeLinejoin="round" />}
-        <path d={d} fill={fill} stroke={data.dash === 'none' ? 'none' : stroke} strokeWidth={sw}
+        {selected && <path data-f d={d} fill="none" stroke={ACCENT} strokeOpacity={0.35} strokeWidth={sw + 5} strokeLinejoin="round" />}
+        <path data-f className="box-main" d={d} fill={fill} stroke={data.dash === 'none' ? 'none' : stroke} strokeWidth={sw}
           strokeDasharray={data.dash === 'dashed' ? '6 4' : undefined} strokeLinejoin="round" />
-        {dropping && <path d={d} fill={ACCENT} fillOpacity={0.06} stroke={ACCENT} strokeWidth={2} strokeDasharray="5 4" strokeLinejoin="round" />}
+        {data.shape === 'memo-lined' && (
+          <g className="memo-lines" stroke="var(--ink)" strokeOpacity={0.16} strokeWidth={1}>
+            {Array.from({ length: Math.max(0, Math.floor((h - MEMO.pad - 21 - 6) / MEMO.line) + 1) }, (_, k) => {
+              const y = MEMO.pad + 21 + k * MEMO.line + 0.5
+              return <line key={k} x1={MEMO.pad - 4} x2={w - (y > h - fold ? fold + 4 : MEMO.pad - 4)} y1={y} y2={y} />
+            })}
+          </g>
+        )}
+        {memoKind && <path d={`M${w} ${h - fold}L${w - fold} ${h - fold}L${w - fold} ${h}Z`} fill="var(--ink)" fillOpacity={0.12} />}
+        {dropping && <path data-f className="box-drop" d={d} fill={ACCENT} fillOpacity={0.06} stroke={ACCENT} strokeWidth={2} strokeDasharray="5 4" strokeLinejoin="round" />}
       </svg>
       <div ref={content} className={`box-content${editing ? ' nodrag nopan editing' : ''}`}
-        style={{ ...(data.wrap ? { width: data.wrap } : { maxWidth: MAX_W }), ...(frame && { top: frame.top }) }}>
-        {editing ? <BoxEditor id={id} data={data} /> : empty ? (frame ? null : <div className="box-empty" />) : <BoxView data={data} />}
+        onContextMenu={editing ? (e) => e.stopPropagation() : undefined}
+        style={{ ...(textW ? { width: textW } : { maxWidth: MAX_W }), ...(frame && { top: frame.top }) }}>
+        {editing ? <BoxEditor id={id} data={data} /> : empty ? (frame || memoKind ? null : <div className="box-empty" />) : <BoxView data={data} />}
         <MediaList id={id} media={data.media} editing={editing} />
         {!data.hidePreview && <LinkCards html={data.body} />}
       </div>
-      {selected && !frame && <WidthHandle id={id} data={data} contentWidth={size.w} />}
+      {solo && !editing && (
+        <NodeResizer minWidth={48} minHeight={frame ? 40 : Math.round(natural.h)} color={ACCENT} handleClassName="rs-h" lineClassName="rs-l"
+          onResizeStart={() => { commit(); useEd.setState({ resizing: id }) }} onResizeEnd={() => useEd.setState({ resizing: null })} />
+      )}
       {SIDES.map((s) => <Handle key={s.id} id={s.id} type="source" position={s.pos} className="h" />)}
     </div>
   )
 })
+
+const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches
+
+/**
+ * 틀(집합)의 크기·위치가 바뀌면 예전 자리에서 새 자리로 0.3초 동안 옮겨 그린다.
+ * 상자를 끌거나 손잡이로 크기를 바꾸는 중에는 그대로 따라간다.
+ */
+function useFrameMotion(id: string, box: { current: HTMLDivElement | null }, center: { x: number; y: number } | undefined, cur: Omit<Shown, 'x' | 'y'>, shape: BoxData['shape']) {
+  const last = useRef<Shown | null>(null)
+  const stop = useRef<(() => void) | null>(null)
+  useLayoutEffect(() => {
+    if (!center || !box.current) return
+    const now: Shown = { ...cur, x: center.x, y: center.y }
+    const p = last.current
+    last.current = now
+    if (!p || (!p.set && !now.set) || (near(p.w, now.w) && near(p.h, now.h)) || useEd.getState().resizing === id || reduced()) return
+    const el = box.current
+    const paths = [...el.querySelectorAll<SVGPathElement>('path[data-f]')]
+    // 머리글 기준점: 집합은 위쪽 가운데, 아니면 한가운데
+    const anchor = (r: Shown) => ({ x: r.x, y: r.set ? r.y - r.h / 2 + r.top : r.y })
+    const a0 = anchor(p), a1 = anchor(now)
+    const ox = p.x - p.w / 2 - (now.x - now.w / 2), oy = p.y - p.h / 2 - (now.y - now.h / 2)
+    stop.current?.()
+    const ctl = animate(0, 1, {
+      duration: 0.3, ease: [0.22, 1, 0.36, 1],
+      onUpdate: (t) => {
+        const k = 1 - t, w = p.w + (now.w - p.w) * t, h = p.h + (now.h - p.h) * t
+        el.style.setProperty('--fx', `${ox * k}px`)
+        el.style.setProperty('--fy', `${oy * k}px`)
+        el.style.setProperty('--cx', `${(a0.x - a1.x) * k}px`)
+        el.style.setProperty('--cy', `${(a0.y - a1.y) * k}px`)
+        const d = shapePath(shape, w, h)
+        for (const q of paths) if (q.isConnected) q.setAttribute('d', d)
+      },
+      onComplete: () => {
+        for (const v of ['--fx', '--fy', '--cx', '--cy']) el.style.removeProperty(v)
+        const d = shapePath(shape, now.w, now.h)
+        for (const q of el.querySelectorAll('path[data-f]')) q.setAttribute('d', d)
+      },
+    })
+    stop.current = () => ctl.stop()
+  })
+}
 
 function openLink(e: MouseEvent) {
   const a = (e.target as HTMLElement).closest('a')
@@ -191,34 +278,5 @@ function LinkCard({ url }: { url: string }) {
         <span className="lc-host">{meta.logo && <img src={meta.logo} alt="" referrerPolicy="no-referrer" />}{meta.site || host}</span>
       </span>
     </a>
-  )
-}
-
-/** 선택된 상자 오른쪽의 폭 조절 손잡이. 더블클릭하면 자동 폭으로 */
-function WidthHandle({ id, data, contentWidth }: { id: string; data: BoxData; contentWidth: number }) {
-  const zoom = useStore((s) => s.transform[2])
-  const down = (e: PointerEvent) => {
-    e.stopPropagation()
-    const el = e.currentTarget as HTMLElement
-    el.setPointerCapture(e.pointerId)
-    const x0 = e.clientX, w0 = data.wrap ?? contentWidth
-    const node = useEd.getState().nodes.find((n) => n.id === id)!
-    const px0 = node.position.x
-    let first = true
-    const move = (ev: globalThis.PointerEvent) => {
-      const dx = (ev.clientX - x0) / zoom
-      const wrap = Math.max(60, Math.round(w0 + dx))
-      patchNodes([id], { wrap }, first)
-      first = false
-      // 왼쪽 끝을 고정하기 위해 중심을 옮긴다
-      useEd.setState((s) => ({ nodes: s.nodes.map((n) => (n.id === id ? { ...n, position: { ...n.position, x: px0 + (wrap - w0) / 2 } } : n)) }))
-    }
-    const up = () => { el.removeEventListener('pointermove', move); el.removeEventListener('pointerup', up) }
-    el.addEventListener('pointermove', move)
-    el.addEventListener('pointerup', up)
-  }
-  return (
-    <div className="wrap-handle nodrag" title="폭 조절 (더블클릭: 자동)" onPointerDown={down}
-      onDoubleClick={(e) => { e.stopPropagation(); patchNodes([id], { wrap: null }) }} />
   )
 }

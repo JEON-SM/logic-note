@@ -5,15 +5,16 @@ import { useShallow } from 'zustand/react/shallow'
 import {
   AlignCenter, AlignLeft, AlignRight, Baseline, Bold, CornerDownRight, Copy, Film, Hand, Highlighter, ImagePlus, Italic,
   Link2, List, ListChecks, ListOrdered, MoreHorizontal, MousePointer2, PaintBucket, Spline, Square, Strikethrough, Tag,
-  Trash2, Type, Underline, GitBranchPlus, Eye, EyeOff, MoveHorizontal, Group, Ungroup, Palette,
+  Trash2, Type, Underline, GitBranchPlus, Eye, EyeOff, Group, Ungroup, Palette, StickyNote, NotebookPen, Scaling, LogIn,
 } from 'lucide-react'
 import { HIGHLIGHTS } from '../lib/color'
 import { pickFiles } from '../lib/media'
 import { FONTS, SIZES, parseSize, sizeInPt } from '../lib/rich'
-import { RELS, SHAPES, defaultBox, defaultEdge } from '../lib/shapes'
+import { MEMOS, RELS, SHAPES, defaultBox, defaultEdge, isMemo } from '../lib/shapes'
 import type { EdgeData } from '../lib/types'
 import { ColorButton, IB, Item, Menu, MenuSep, Pop, RelIcon, Sep, ShapeIcon, cls } from '../ui/kit'
 import { addChild, insertFiles, insertLink } from './actions'
+import { startPicking } from './CanvasMenu'
 import { openDefaults } from './DefaultsDialog'
 import { copySelection, fmt, groupSelection, pasteClip, patchEdges, patchNodes, takeOut, useEd } from './store'
 
@@ -53,6 +54,12 @@ function CreateTools() {
           <ShapeIcon shape={s.id} />
         </IB>
       ))}
+      <Menu trigger={<IB label="메모지 — 캔버스를 눌러 붙이기" on={tool === 'place' && isMemo(shape)}><StickyNote {...S} /></IB>}>
+        {MEMOS.map((m) => (
+          <Item key={m.id} icon={m.id === 'memo' ? <StickyNote size={16} /> : <NotebookPen size={16} />} checked={tool === 'place' && shape === m.id}
+            onSelect={() => useEd.setState({ tool: 'place', shape: m.id })}>{m.label}</Item>
+        ))}
+      </Menu>
       <Sep />
       <Menu trigger={<IB label="새 연결선 모양"><LineIcon kind={edgeStyle.kind} arrow={edgeStyle.arrow} dashed={edgeStyle.dashed} /></IB>}>
         <EdgeStyleItems d={edgeStyle} set={setStyle} />
@@ -132,7 +139,10 @@ function NodeTools({ ids }: { ids: string[] }) {
     <>
       <Menu trigger={<IB label="도형"><ShapeIcon shape={first.shape} /></IB>}>
         {SHAPES.map((s) => <Item key={s.id} icon={<ShapeIcon shape={s.id} size={16} />} checked={first.shape === s.id} onSelect={() => patchNodes(ids, { shape: s.id })}>{s.label}</Item>)}
+        <MenuSep />
+        {MEMOS.map((m) => <Item key={m.id} icon={<ShapeIcon shape={m.id} size={16} />} checked={first.shape === m.id} onSelect={() => patchNodes(ids, { shape: m.id })}>{m.label}</Item>)}
       </Menu>
+      <SizeBox ids={ids} />
       <ColorButton label="채우기" icon={<PaintBucket {...S} />} value={first.fill} none="기본" onChange={(fill) => patchNodes(ids, { fill })} />
       <ColorButton label="테두리 색" icon={<Square {...S} />} value={first.stroke} none="기본" onChange={(stroke) => patchNodes(ids, { stroke })} />
       <Menu trigger={<IB label="테두리 모양"><LineIcon dashed={first.dash === 'dashed'} /></IB>}>
@@ -175,9 +185,10 @@ function NodeTools({ ids }: { ids: string[] }) {
       <Menu align="end" trigger={<IB label="더보기"><MoreHorizontal {...S} /></IB>}>
         <Item icon={<GitBranchPlus size={16} />} onSelect={addChild}>연결된 상자 추가 (Tab)</Item>
         <Item icon={<Group size={16} />} onSelect={groupSelection}>집합으로 묶기 (Ctrl+G)</Item>
+        <Item icon={<LogIn size={16} />} onSelect={() => startPicking(ids)}>다른 상자에 넣기…</Item>
         {inSet && <Item icon={<Ungroup size={16} />} onSelect={() => takeOut(ids)}>집합에서 꺼내기</Item>}
         <Item icon={<Copy size={16} />} onSelect={() => { copySelection(); pasteClip() }}>복제 (Ctrl+D)</Item>
-        <Item icon={<MoveHorizontal size={16} />} onSelect={() => patchNodes(ids, { wrap: null })}>폭 자동 맞춤</Item>
+        <Item icon={<Scaling size={16} />} onSelect={() => patchNodes(ids, { w: null, h: null, wrap: null })}>크기 자동 맞춤</Item>
         <Item icon={<Film size={16} />} onSelect={async () => insertFiles(await pickFiles('video/*'))}>영상 넣기</Item>
         {hasLinks && (
           <Item icon={first.hidePreview ? <Eye size={16} /> : <EyeOff size={16} />} onSelect={() => patchNodes(ids, { hidePreview: !first.hidePreview })}>
@@ -187,6 +198,27 @@ function NodeTools({ ids }: { ids: string[] }) {
       </Menu>
       <IB label="삭제" onClick={() => rf.deleteElements({ nodes: ids.map((id) => ({ id })) })}><Trash2 {...S} /></IB>
     </>
+  )
+}
+
+/** 상자 크기를 숫자로: 비우면 그쪽은 글에 맞춰 자동 */
+function SizeBox({ ids }: { ids: string[] }) {
+  const n = useEd((s) => s.nodes.find((x) => x.id === ids[0]))
+  const [w, setW] = useState(''), [h, setH] = useState('')
+  const cur = { w: Math.round(n?.measured?.width ?? 0), h: Math.round(n?.measured?.height ?? 0) }
+  const num = (v: string) => { const m = v.trim().match(/^(\d+(?:\.\d+)?)\s*(px)?$/i); return m ? Math.min(4000, Math.max(24, Math.round(+m[1]))) : null }
+  return (
+    <Pop trigger={<IB label="상자 크기" on={!!(n?.data.w || n?.data.h)} onClick={() => { setW(n?.data.w ? String(Math.round(n.data.w)) : ''); setH(n?.data.h ? String(Math.round(n.data.h)) : '') }}><Scaling {...S} /></IB>}>
+      <form className="size-box" onSubmit={(e) => { e.preventDefault(); patchNodes(ids, { w: num(w), h: num(h), wrap: null }) }}>
+        <label>폭<input className="field sm" inputMode="numeric" placeholder={`자동 (${cur.w})`} value={w} onChange={(e) => setW(e.target.value)} /></label>
+        <label>높이<input className="field sm" inputMode="numeric" placeholder={`자동 (${cur.h})`} value={h} onChange={(e) => setH(e.target.value)} /></label>
+        <div className="size-box-row">
+          <button type="button" className="btn" onClick={() => { setW(''); setH(''); patchNodes(ids, { w: null, h: null, wrap: null }) }}>자동</button>
+          <button type="submit" className="btn primary">적용</button>
+        </div>
+        <p className="set-help">선택한 상자 모서리를 끌어도 돼요. 손잡이를 두 번 누르면 자동 크기로.</p>
+      </form>
+    </Pop>
   )
 }
 

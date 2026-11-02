@@ -1,7 +1,7 @@
 import type { Node, Edge, Viewport } from '@xyflow/react'
 
-export type Shape = 'rect' | 'round' | 'ellipse' | 'diamond' | 'para' | 'hex'
-export type Bg = 'grid' | 'grid-wide' | 'dots' | 'dots-wide' | 'none'
+export type Shape = 'rect' | 'round' | 'ellipse' | 'diamond' | 'para' | 'hex' | 'memo' | 'memo-lined'
+export type Bg = 'grid' | 'grid-wide' | 'dots' | 'dots-wide' | 'lines' | 'none'
 
 export interface MediaItem { id: string; kind: 'image' | 'video'; mediaId: string }
 
@@ -14,7 +14,11 @@ export type BoxData = {
   stroke: string | null
   strokeWidth: number
   dash: 'solid' | 'dashed' | 'none'
+  /** 예전 방식의 글 폭 고정 (지금은 w를 쓴다) */
   wrap: number | null
+  /** 직접 정한 상자 크기. 글이 더 많으면 그만큼 커진다. 집합은 이 크기를 유지하며 안쪽 상자에 맞춰 늘어난다 */
+  w?: number | null
+  h?: number | null
   hidePreview?: boolean
   /** 이 상자를 감싸는 상자(집합) */
   parent?: string | null
@@ -62,6 +66,14 @@ export interface Folder {
   syncedAt?: number
 }
 
+/** A4 용지 노트: 페이지를 위에서 아래로 쌓는다. 상자는 놓인 위치로 어느 페이지인지 정해진다 */
+export interface Paper {
+  size: 'a4'
+  landscape?: boolean
+  /** 페이지 순서 (id는 순서를 바꿀 때 구분용) */
+  pages: string[]
+}
+
 export interface Note {
   id: string
   folderId: string | null
@@ -70,6 +82,8 @@ export interface Note {
   edges: LogicEdge[]
   viewport?: Viewport
   bg?: Bg
+  /** 있으면 A4 용지 노트, 없으면 무한 캔버스 */
+  paper?: Paper | null
   /** 이 노트만의 기본 모양. 없으면 전체 설정을 따른다 */
   defaults?: Defaults | null
   favorite?: number

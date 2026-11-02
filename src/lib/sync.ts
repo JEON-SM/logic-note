@@ -108,7 +108,7 @@ async function listAll(): Promise<DFile[]> {
 
 const dirty = (x: { dirty?: number }) => !!x.dirty
 const moveQs = (from: string | undefined, to: string) => (from && from !== to ? `&addParents=${to}&removeParents=${from}` : '')
-const sameContent = (a: Note, b: Note) => a.title === b.title && JSON.stringify([a.nodes, a.edges]) === JSON.stringify([b.nodes, b.edges])
+const sameContent = (a: Note, b: Note) => a.title === b.title && JSON.stringify([a.nodes, a.edges, a.paper ?? null]) === JSON.stringify([b.nodes, b.edges, b.paper ?? null])
 
 /** 올린 뒤: 원격 버전을 기록하고, 그 사이 다시 바뀌지 않았으면 변경 표시를 지운다 */
 async function settle(table: typeof db.notes | typeof db.folders, id: string, localU: number, remoteU: number, patch: { driveId?: string }) {

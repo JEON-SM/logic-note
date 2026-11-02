@@ -1,20 +1,24 @@
 import { create } from 'zustand'
 import { applyEdgeChanges, applyNodeChanges, type EdgeChange, type NodeChange, type XYPosition } from '@xyflow/react'
 import type { Editor } from '@tiptap/core'
+import { animate } from 'motion/react'
 import { uid, updateNote } from '../lib/db'
+import { PAGE_GAP, fitToPaper, newPaper, nodesByPage, pageAt, pageSize, pageStep, paperKind, shift, type PaperKind } from '../lib/pages'
 import { applyToHtml, type Fmt } from '../lib/rich'
-import { boxAt, hierarchy, layoutSets, rectOf, type Frame } from '../lib/sets'
-import { defaultBox, defaultEdge } from '../lib/shapes'
+import { boxAt, hierarchy, layoutSets, rectOf, type Frame, type Rect } from '../lib/sets'
+import { MEMO, defaultBox, defaultEdge, isMemo } from '../lib/shapes'
 import { useSettings } from '../lib/store'
-import type { Bg, BoxData, BoxNode, Defaults, EdgeData, LogicEdge, Note, Shape } from '../lib/types'
+import type { Bg, BoxData, BoxNode, Defaults, EdgeData, LogicEdge, Note, Paper, Shape } from '../lib/types'
 
-type Snap = { nodes: BoxNode[]; edges: LogicEdge[] }
+type Snap = { nodes: BoxNode[]; edges: LogicEdge[]; paper: Paper | null }
 export type Tool = 'hand' | 'select' | 'place'
 
 interface S {
   noteId: string
   title: string
   bg: Bg
+  /** A4 용지 노트면 페이지 구성, 무한 캔버스면 null */
+  paper: Paper | null
   /** 이 노트만의 기본 모양 (null이면 전체 설정) */
   defaults: Defaults | null
   nodes: BoxNode[]
@@ -23,6 +27,10 @@ interface S {
   frames: Record<string, Frame>
   /** 끌고 있는 상자를 놓으면 들어갈 상자 */
   dropTarget: string | null
+  /** '다른 상자에 넣기': 넣을 상자를 고르는 중인 상자들 */
+  picking: string[] | null
+  /** 손잡이로 크기를 바꾸고 있는 상자 (이때는 틀 움직임을 생략) */
+  resizing: string | null
   editingId: string | null
   editingEdge: string | null
   active: Editor | null
@@ -35,14 +43,15 @@ interface S {
 }
 
 export const useEd = create<S>(() => ({
-  noteId: '', title: '', bg: 'grid', defaults: null, nodes: [], edges: [], frames: {}, dropTarget: null, editingId: null, editingEdge: null, active: null,
+  noteId: '', title: '', bg: 'grid', paper: null, defaults: null, nodes: [], edges: [], frames: {}, dropTarget: null, picking: null, resizing: null,
+  editingId: null, editingEdge: null, active: null,
   tool: 'hand', shape: 'rect', edgeStyle: defaultEdge(), past: [], future: [], rev: 0,
 }))
 const get = useEd.getState
 const set = useEd.setState
 
 const clean = <T extends { selected?: boolean; dragging?: boolean }>(a: T[]) => a.map(({ selected, dragging, ...r }) => r as T)
-const snap = (): Snap => ({ nodes: clean(get().nodes), edges: clean(get().edges) })
+const snap = (): Snap => ({ nodes: clean(get().nodes), edges: clean(get().edges), paper: get().paper })
 const bump = () => get().rev + 1
 
 // ── 기본 모양 ──
@@ -63,8 +72,8 @@ let loading = false
 export function loadNote(n: Note) {
   loading = true
   set({
-    noteId: n.id, title: n.title, bg: n.bg ?? 'grid', defaults: n.defaults ?? null, nodes: n.nodes, edges: n.edges, frames: {},
-    editingId: null, editingEdge: null, dropTarget: null, past: [], future: [], rev: 0, tool: 'hand',
+    noteId: n.id, title: n.title, bg: n.bg ?? 'grid', paper: n.paper ?? null, defaults: n.defaults ?? null, nodes: n.nodes, edges: n.edges, frames: {},
+    editingId: null, editingEdge: null, dropTarget: null, picking: null, resizing: null, past: [], future: [], rev: 0, tool: 'hand',
   })
   applyDefaults()
   loading = false
@@ -80,7 +89,7 @@ export function flushSave() {
   if (noteId) updateNote(noteId, { title, bg, defaults, ...snap() })
 }
 useEd.subscribe((s, p) => {
-  if (!loading && s.noteId && s.noteId === p.noteId && (s.rev !== p.rev || s.title !== p.title || s.bg !== p.bg || s.defaults !== p.defaults)) {
+  if (!loading && s.noteId && s.noteId === p.noteId && (s.rev !== p.rev || s.title !== p.title || s.bg !== p.bg || s.defaults !== p.defaults || s.paper !== p.paper)) {
     clearTimeout(timer)
     timer = setTimeout(flushSave, 600)
   }
@@ -90,9 +99,11 @@ addEventListener('pagehide', flushSave)
 // ── 집합 배치 ──
 // 상자 글 영역의 잰 크기 (BoxNode가 알려 준다). 바깥 상자의 머리글 자리를 잡는 데 쓴다
 const heads = new Map<string, { w: number; h: number }>()
+// 끄는 동안·미끄러지는 동안에는 틀을 다시 맞추지 않는다
 let dragging = false
+let moving = false
 export function relayout() {
-  if (dragging) return
+  if (dragging || moving) return
   const s = get()
   const r = layoutSets(s.nodes, s.edges, s.frames, heads, s.editingId)
   if (r.nodes !== s.nodes || r.edges !== s.edges || r.frames !== s.frames) set({ nodes: r.nodes, edges: r.edges, frames: r.frames })
@@ -118,12 +129,25 @@ export function redo() {
   set((s) => ({ future: s.future.slice(0, -1), past: [...s.past, snap()], ...f, editingId: null, rev: bump() }))
 }
 
-export function onNodesChange(ch: NodeChange<BoxNode>[]) {
-  const content = ch.some((c) => c.type !== 'select' && c.type !== 'dimensions')
+export function onNodesChange(changes: NodeChange<BoxNode>[]) {
+  // 크기 손잡이(NodeResizer)의 변경은 상자 자료의 w·h로 옮긴다. 손대지 않은 쪽은 자동 크기로 둔다
+  const sized = new Map<string, { w?: number; h?: number }>()
+  const ch = changes.map((c) => {
+    if (c.type !== 'dimensions' || !c.setAttributes || !c.dimensions) return c
+    const n = get().nodes.find((x) => x.id === c.id)
+    const m = n?.measured, d = c.dimensions
+    sized.set(c.id, {
+      ...((n?.data.w || !m?.width || Math.abs(d.width - m.width) > 0.5) && { w: Math.round(d.width) }),
+      ...((n?.data.h || !m?.height || Math.abs(d.height - m.height) > 0.5) && { h: Math.round(d.height) }),
+    })
+    return { ...c, setAttributes: undefined }
+  })
+  const content = ch.some((c) => c.type !== 'select' && c.type !== 'dimensions') || sized.size > 0
   set((s) => {
     let nodes = applyNodeChanges(ch, s.nodes)
-    // 바깥 상자를 끌면 안의 상자도 같이 움직인다
-    const moves = ch.filter((c) => c.type === 'position' && c.position)
+    if (sized.size) nodes = nodes.map((n) => (sized.has(n.id) ? { ...n, data: { ...n.data, ...sized.get(n.id), wrap: null } } : n))
+    // 바깥 상자를 끌면 안의 상자도 같이 움직인다 (크기 조절로 중심이 옮겨진 건 제외)
+    const moves = ch.filter((c) => c.type === 'position' && c.position && !sized.has(c.id))
     if (moves.length) {
       const { descendants } = hierarchy(s.nodes)
       const moving = new Set(moves.map((c) => (c as { id: string }).id))
@@ -158,7 +182,11 @@ export function addBox(position: XYPosition, shape: Shape, patch: Partial<BoxDat
   commit()
   const id = uid()
   const d = effDefaults()
-  const node: BoxNode = { id, type: 'box', position, data: { ...defaultBox(shape), fill: d.fill, stroke: d.stroke, ...patch }, selected: true }
+  const memo = isMemo(shape) && { fill: MEMO.fill, stroke: null, dash: 'none' as const, w: MEMO.w, h: MEMO.h }
+  const node: BoxNode = {
+    id, type: 'box', position: clampToPaper(position), selected: true,
+    data: { ...defaultBox(shape), fill: d.fill, stroke: d.stroke, ...memo, ...patch },
+  }
   set((s) => ({
     nodes: [...s.nodes.map((n) => (n.selected ? { ...n, selected: false } : n)), node],
     edges: s.edges.map((e) => (e.selected ? { ...e, selected: false } : e)),
@@ -200,7 +228,13 @@ export function dragOver(id: string) {
   const s = get()
   const n = s.nodes.find((x) => x.id === id)
   if (!n) return
-  const target = boxAt(s.nodes, s.frames, n.position.x, n.position.y, draggedIds)
+  let target = boxAt(s.nodes, s.frames, n.position.x, n.position.y, draggedIds)
+  // 원래 집합에 조금이라도 걸쳐 있으면 그 안에 남는다 (틀이 늘어남). 완전히 벗어나야 빠진다
+  const p = n.data.parent && s.nodes.find((x) => x.id === n.data.parent)
+  if (p && target !== p.id && !(target && hierarchy(s.nodes).descendants(p.id).includes(target))) {
+    const a = rectOf(n), b = rectOf(p, s.frames[p.id])
+    if (a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y) target = p.id
+  }
   if (target !== s.dropTarget) set({ dropTarget: target })
 }
 /** 놓을 때: 함께 끈 상자 중 가장 바깥 것들을 표시된 상자 안으로 (빈 곳이면 밖으로) */
@@ -218,6 +252,18 @@ export function finishDrag(ids: string[]) {
     rev: st.rev + 1,
   }))
   relayout()
+  // 용지 노트: 종이 밖에 놓으면 가장 가까운 종이 안으로 돌아온다
+  const paper = get().paper
+  if (!paper) return
+  const { w } = pageSize(paper), bottom = paper.pages.length * pageStep(paper) - PAGE_GAP
+  const back = new Map<string, XYPosition>()
+  for (const id of tops) {
+    const c = get().nodes.find((n) => n.id === id)?.position
+    if (!c) continue
+    const x = Math.min(w - 20, Math.max(20, c.x)), y = Math.min(bottom - 20, Math.max(20, c.y))
+    if (x !== c.x || y !== c.y) back.set(id, { x: x - c.x, y: y - c.y })
+  }
+  if (back.size) glide(back, () => {})
 }
 
 /** 선택한 상자들을 새 상자로 감싼다 (Ctrl+G) */
@@ -236,12 +282,78 @@ export function groupSelection() {
   startEditing(id)
 }
 
-/** 선택한 상자를 한 겹 바깥으로 꺼낸다 */
+// ── 움직임: 상자를 새 자리로 미끄러지듯 옮긴 뒤 포함 관계를 바꾼다 ──
+const EASE = [0.22, 1, 0.36, 1] as const
+/** 각 상자(와 그 안의 상자)를 0.35초 동안 옮기고, 끝나면 done */
+export function glide(delta: Map<string, XYPosition>, done: () => void) {
+  const { descendants } = hierarchy(get().nodes)
+  const all = new Map<string, XYPosition>()
+  for (const [id, d] of delta) for (const x of [id, ...descendants(id)]) all.set(x, d)
+  const from = new Map(get().nodes.filter((n) => all.has(n.id)).map((n) => [n.id, n.position]))
+  const at = (t: number) => (s: S) => ({
+    nodes: s.nodes.map((n) => { const d = all.get(n.id), p = from.get(n.id); return d && p ? { ...n, position: { x: p.x + d.x * t, y: p.y + d.y * t } } : n }),
+  })
+  const finish = () => { set(at(1)); moving = false; done(); set((s) => ({ rev: s.rev + 1 })); relayout() }
+  if (![...all.values()].some((d) => d.x || d.y) || matchMedia('(prefers-reduced-motion: reduce)').matches) return finish()
+  moving = true
+  animate(0, 1, { duration: 0.35, ease: EASE, onUpdate: (t) => set(at(t)), onComplete: finish })
+}
+
+const topsOf = (ids: string[]) => {
+  const { parentOf } = hierarchy(get().nodes)
+  const all = new Set(ids)
+  return ids.filter((id) => { for (let p = parentOf.get(id); p; p = parentOf.get(p)) if (all.has(p)) return false; return true })
+}
+const unionRect = (rs: Rect[]): Rect => {
+  const x = Math.min(...rs.map((r) => r.x)), y = Math.min(...rs.map((r) => r.y))
+  return { x, y, w: Math.max(...rs.map((r) => r.x + r.w)) - x, h: Math.max(...rs.map((r) => r.y + r.h)) - y }
+}
+const rectById = (id: string) => rectOf(get().nodes.find((x) => x.id === id)!, get().frames[id])
+
+/** 선택한 상자를 한 겹 바깥으로 꺼낸다: 원래 집합 오른쪽으로 비켜 나간다 */
 export function takeOut(ids: string[]) {
   const { parentOf } = hierarchy(get().nodes)
-  const inner = ids.filter((id) => parentOf.has(id))
+  const inner = topsOf(ids).filter((id) => parentOf.has(id))
   if (!inner.length) return
-  patchNodes(inner, (d) => ({ parent: (d.parent && parentOf.get(d.parent)) ?? null }))
+  commit()
+  const delta = new Map<string, XYPosition>()
+  for (const p of new Set(inner.map((id) => parentOf.get(id)!))) {
+    const group = inner.filter((id) => parentOf.get(id) === p)
+    const g = unionRect(group.map(rectById)), box = rectById(p)
+    for (const id of group) delta.set(id, { x: box.x + box.w + 40 - g.x, y: 0 })
+  }
+  glide(delta, () => set((s) => ({
+    nodes: s.nodes.map((n) => (delta.has(n.id) ? { ...n, data: { ...n.data, parent: parentOf.get(parentOf.get(n.id)!) ?? null } } : n)),
+  })))
+}
+
+/** 상자를 넣을 수 있는 곳인지: 메모지·자기 자신·자기 안쪽은 안 된다 */
+export function canHold(target: string, ids: string[]) {
+  const s = get(), t = s.nodes.find((n) => n.id === target)
+  if (!t || isMemo(t.data.shape)) return false
+  const { descendants } = hierarchy(s.nodes)
+  return !ids.some((id) => id === target || descendants(id).includes(target))
+}
+
+/** 상자들을 다른 상자 안으로: 그 안의 빈 곳(안쪽 상자들 아래)으로 미끄러져 들어간다 */
+export function moveInto(ids: string[], target: string) {
+  const s = get()
+  const { kids } = hierarchy(s.nodes)
+  const moved = topsOf(ids).filter((id) => s.nodes.find((n) => n.id === id)?.data.parent !== target)
+  set({ picking: null, dropTarget: null })
+  if (!moved.length || !canHold(target, moved)) return
+  commit()
+  const g = unionRect(moved.map(rectById)), box = rectById(target)
+  const inside = (kids.get(target) ?? []).filter((id) => !moved.includes(id))
+  let to: XYPosition
+  if (inside.length) {
+    const c = unionRect(inside.map(rectById))
+    to = { x: c.x, y: c.y + c.h + 24 }
+  } else to = { x: box.x + box.w / 2 - g.w / 2, y: box.y + box.h / 2 - g.h / 2 + 16 }
+  const d = { x: to.x - g.x, y: to.y - g.y }
+  glide(new Map(moved.map((id) => [id, d])), () => set((st) => ({
+    nodes: st.nodes.map((n) => (moved.includes(n.id) ? { ...n, data: { ...n.data, parent: target } } : n)),
+  })))
 }
 
 export function startEditing(id: string) {
@@ -260,7 +372,7 @@ export function fmt(fn: Fmt) {
 }
 
 // ── 복사 / 붙여넣기 ──
-let clip: Snap | null = null
+let clip: Omit<Snap, 'paper'> | null = null
 export const CLIP_MARK = '⁣logic-note-clip'
 export function copySelection() {
   const sel = selectedNodes()
@@ -273,6 +385,17 @@ export function copySelection() {
   return true
 }
 export const hasClip = () => !!clip
+export function cutSelection() {
+  if (!copySelection()) return false
+  commit()
+  const ids = new Set(clip!.nodes.map((n) => n.id))
+  set((s) => ({
+    nodes: s.nodes.filter((n) => !ids.has(n.id)),
+    edges: s.edges.filter((e) => !ids.has(e.source) && !ids.has(e.target)),
+    rev: s.rev + 1,
+  }))
+  return true
+}
 export function pasteClip(offset = 32) {
   if (!clip) return
   commit()
@@ -284,4 +407,88 @@ export function pasteClip(offset = 32) {
   const edges = clip.edges.map((e) => ({ ...e, id: uid(), source: map.get(e.source)!, target: map.get(e.target)! }))
   clip = { nodes: clean(nodes), edges }
   set((s) => ({ nodes: [...s.nodes.map((n) => ({ ...n, selected: false })), ...nodes], edges: [...s.edges, ...edges], rev: s.rev + 1 }))
+}
+
+// ── A4 용지 ──
+/** 용지 노트에서 새 상자가 페이지 밖에 생기지 않게 */
+export function clampToPaper(p: XYPosition): XYPosition {
+  const paper = get().paper
+  if (!paper) return p
+  const { w, h } = pageSize(paper), top = pageAt(paper, p.y) * pageStep(paper)
+  return { x: Math.min(w - 20, Math.max(20, p.x)), y: Math.min(top + h - 20, Math.max(top + 20, p.y)) }
+}
+
+export { paperKind, type PaperKind }
+
+/** 무한 캔버스 ↔ A4 (세로·가로). 내용이 용지보다 넓으면 true */
+export function setPaper(kind: PaperKind): boolean {
+  const s = get()
+  if (kind === paperKind(s.paper)) return false
+  commit()
+  if (kind === 'canvas') { set((st) => ({ paper: null, rev: st.rev + 1 })); return false }
+  if (!s.paper) {
+    const r = fitToPaper(newPaper(kind === 'a4-land'), s.nodes, s.frames)
+    set((st) => ({ paper: r.paper, nodes: r.nodes, rev: st.rev + 1 }))
+    return r.overflow
+  }
+  // 방향만 바꿀 때: 각 페이지의 내용은 그 페이지에 그대로
+  const old = s.paper, next: Paper = { ...old, landscape: kind === 'a4-land' || undefined }
+  const dy = new Map<string, number>()
+  nodesByPage(old, s.nodes).forEach((ids, i) => ids.forEach((id) => dy.set(id, i * (pageStep(next) - pageStep(old)))))
+  set((st) => ({ paper: next, nodes: shift(st.nodes, dy), rev: st.rev + 1 }))
+  return false
+}
+
+/** 페이지 순서를 바꾼다 (order: 새 순서의 페이지 id) */
+export function reorderPages(order: string[]) {
+  const s = get(), p = s.paper
+  if (!p || order.join() === p.pages.join()) return
+  commit()
+  const dy = new Map<string, number>()
+  nodesByPage(p, s.nodes).forEach((ids, i) => ids.forEach((id) => dy.set(id, (order.indexOf(p.pages[i]) - i) * pageStep(p))))
+  set((st) => ({ paper: { ...p, pages: order }, nodes: shift(st.nodes, dy), rev: st.rev + 1 }))
+}
+
+/** at 위치에 빈 페이지를 끼운다 (뒤 페이지 내용은 한 칸씩 아래로) */
+export function addPage(at?: number, record = true) {
+  const s = get(), p = s.paper
+  if (!p) return
+  if (record) commit()
+  const i = at ?? p.pages.length
+  const dy = new Map<string, number>()
+  nodesByPage(p, s.nodes).forEach((ids, k) => k >= i && ids.forEach((id) => dy.set(id, pageStep(p))))
+  const pages = [...p.pages]
+  pages.splice(i, 0, newPaper().pages[0])
+  set((st) => ({ paper: { ...p, pages }, nodes: shift(st.nodes, dy), rev: st.rev + 1 }))
+}
+
+/** 페이지와 그 위의 상자를 지운다 (마지막 한 장은 남긴다) */
+export function removePage(i: number) {
+  const s = get(), p = s.paper
+  if (!p || p.pages.length < 2) return
+  commit()
+  const by = nodesByPage(p, s.nodes), gone = new Set(by[i]), dy = new Map<string, number>()
+  by.forEach((ids, k) => k > i && ids.forEach((id) => dy.set(id, -pageStep(p))))
+  set((st) => ({
+    paper: { ...p, pages: p.pages.filter((_, k) => k !== i) },
+    nodes: shift(st.nodes.filter((n) => !gone.has(n.id)), dy),
+    edges: st.edges.filter((e) => !gone.has(e.source) && !gone.has(e.target)),
+    rev: st.rev + 1,
+  }))
+}
+
+/** 페이지를 내용째 복제해 바로 뒤에 넣는다 */
+export function duplicatePage(i: number) {
+  const s = get(), p = s.paper
+  if (!p) return
+  commit()
+  const ids = new Set(nodesByPage(p, s.nodes)[i])
+  addPage(i + 1, false)
+  const map = new Map([...ids].map((id) => [id, uid()]))
+  const nodes = clean(s.nodes.filter((n) => ids.has(n.id))).map((n) => ({
+    ...n, id: map.get(n.id)!, position: { x: n.position.x, y: n.position.y + pageStep(p) },
+    data: { ...n.data, parent: n.data.parent ? map.get(n.data.parent) ?? n.data.parent : null },
+  }))
+  const edges = clean(s.edges.filter((e) => ids.has(e.source) && ids.has(e.target))).map((e) => ({ ...e, id: uid(), source: map.get(e.source)!, target: map.get(e.target)! }))
+  set((st) => ({ nodes: [...st.nodes, ...nodes], edges: [...st.edges, ...edges], rev: st.rev + 1 }))
 }

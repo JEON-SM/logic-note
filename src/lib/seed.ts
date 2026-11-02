@@ -27,8 +27,8 @@ export async function seedIfEmpty() {
       box('d', 0, 175, { shape: 'rect', title: '<p>결론</p>', body: `<p>소크라테스는 ${hl('죽는다', '#FFF176')}</p>`, fill: '#DDF3E4', stroke: '#30A46C' }),
       box('e', 290, 0, { shape: 'ellipse', title: '<p>다시 검토</p>', dash: 'dashed' }),
       box('tip', -400, 20, {
-        shape: 'rect', fill: '#FFF4C2', dash: 'none', wrap: 190,
-        title: '<p style="text-align: left">사용법</p>',
+        shape: 'memo', fill: '#FFF4C2', dash: 'none', w: 220, h: 176,
+        title: '<p>사용법</p>',
         body: '<ul><li><p>빈 곳 두 번 눌러 상자</p></li><li><p>상자 두 번 눌러 편집</p></li><li><p>가장자리 점을 끌어 연결</p></li><li><p>Tab: 이어지는 상자</p></li></ul>',
       }),
     ],

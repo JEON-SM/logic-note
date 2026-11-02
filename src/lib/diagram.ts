@@ -197,7 +197,7 @@ async function parseMermaid(code: string): Promise<Graph> {
 
 // ── Graphviz DOT ──
 const DOT_SHAPES: Record<string, Shape> = {
-  box: 'rect', rect: 'rect', rectangle: 'rect', square: 'rect', record: 'rect', component: 'rect', note: 'rect', tab: 'rect', folder: 'rect',
+  box: 'rect', rect: 'rect', rectangle: 'rect', square: 'rect', record: 'rect', component: 'rect', note: 'memo', tab: 'rect', folder: 'rect',
   plaintext: 'rect', plain: 'rect', none: 'rect', underline: 'rect', Mrecord: 'round', cylinder: 'round',
   ellipse: 'ellipse', oval: 'ellipse', circle: 'ellipse', doublecircle: 'ellipse', point: 'ellipse', egg: 'ellipse',
   diamond: 'diamond', Mdiamond: 'diamond',

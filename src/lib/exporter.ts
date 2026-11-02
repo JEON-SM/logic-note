@@ -45,6 +45,7 @@ const direction = (edges: LogicEdge[]) => {
 // ── Mermaid ──
 const MM_SHAPE: Record<Shape, [string, string]> = {
   rect: ['[', ']'], round: ['(', ')'], ellipse: ['((', '))'], diamond: ['{', '}'], para: ['[/', '/]'], hex: ['{{', '}}'],
+  memo: ['[', ']'], 'memo-lined': ['[', ']'],
 }
 const mq = (s: string) => s.replace(/"/g, '#quot;').replace(/</g, '#60;').replace(/>/g, '#62;').replace(/\|/g, '#124;')
 /** 제목은 <b>로 감싸 설명과 구분한다 (가져올 때도 이걸 보고 제목을 나눈다) */
@@ -97,7 +98,9 @@ export function toMermaid(nodes: BoxNode[], edges: LogicEdge[]): string {
 }
 
 // ── Graphviz DOT ──
-const DOT_SHAPE: Record<Shape, string> = { rect: 'box', round: 'box', ellipse: 'ellipse', diamond: 'diamond', para: 'parallelogram', hex: 'hexagon' }
+const DOT_SHAPE: Record<Shape, string> = {
+  rect: 'box', round: 'box', ellipse: 'ellipse', diamond: 'diamond', para: 'parallelogram', hex: 'hexagon', memo: 'note', 'memo-lined': 'note',
+}
 /** 값이 없는 속성은 빼고 넘긴다 */
 const defined = <T extends object>(o: T) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined && v !== '')) as T
 const hq = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
@@ -158,7 +161,7 @@ export async function toDotCode(nodes: BoxNode[], edges: LogicEdge[]): Promise<s
 }
 
 // ── AI용 개요 ──
-const SHAPE_NAME: Partial<Record<Shape, string>> = { ellipse: '원', diamond: '마름모', para: '평행사변형', hex: '육각형' }
+const SHAPE_NAME: Partial<Record<Shape, string>> = { ellipse: '원', diamond: '마름모', para: '평행사변형', hex: '육각형', memo: '메모지', 'memo-lined': '줄 메모지' }
 const ARROW = { end: '→', both: '↔', none: '—' } as const
 
 /**
@@ -326,7 +329,7 @@ export async function captureImage(
     pixelRatio: Math.min(2, 16000 / Math.max(width, height)),
     fontEmbedCSS: await fontCss(text),
     imagePlaceholder: PIXEL,
-    filter: (el: HTMLElement) => !el.classList?.contains('react-flow__handle') && !el.classList?.contains('wrap-handle'),
+    filter: (el: HTMLElement) => !['react-flow__handle', 'react-flow__resize-control', 'pages-layer'].some((c) => el.classList?.contains(c)),
     style: { width: `${width}px`, height: `${height}px`, transform: `translate(${pad - bounds.x}px, ${pad - bounds.y}px) scale(1)` },
   }
   if (format === 'svg') return (await fetch(await toSvg(viewport, options))).blob()

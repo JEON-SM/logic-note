@@ -14,6 +14,7 @@ import { cls, IB, Item, Logo, Menu, MenuSep } from '../ui/kit'
 import { confirmDanger, pickFolder, promptText } from '../ui/Dialogs'
 import { openSettings, SyncButton } from '../ui/Settings'
 import { openImport } from '../ui/ImportDialog'
+import { paperOf } from '../lib/pages'
 import { NoteThumb } from './NoteThumb'
 
 const DRAG = 'application/x-ln-note'
@@ -85,7 +86,7 @@ export function Library({ route }: { route: Route }) {
 
   const title = route.name === 'trash' ? '휴지통' : route.name === 'fav' ? '즐겨찾기' : folder?.name ?? '모든 노트'
   const add = async () => {
-    const n = await createNote(route.name === 'folder' && !folder?.group ? route.id : null)
+    const n = await createNote(route.name === 'folder' && !folder?.group ? route.id : null, paperOf(useSettings.getState().paper))
     freshNotes.add(n.id)
     go('#/n/' + n.id)
   }

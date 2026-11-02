@@ -16,6 +16,7 @@ export const BGS: { id: Bg; label: string }[] = [
   { id: 'grid-wide', label: '넓은 모눈' },
   { id: 'dots', label: '그리드 (점)' },
   { id: 'dots-wide', label: '넓은 그리드 (점)' },
+  { id: 'lines', label: '줄' },
   { id: 'none', label: '없음' },
 ]
 
@@ -42,6 +43,10 @@ export function SettingsDialog() {
         <h3>화면</h3>
         <div className="set-row"><span>테마</span>
           <Segmented value={s.theme} onChange={(theme) => setSettings({ theme })} options={[{ id: 'system', label: '시스템' }, { id: 'light', label: '라이트' }, { id: 'dark', label: '다크' }]} />
+        </div>
+        <div className="set-row"><span>새 노트 용지</span>
+          <Segmented value={s.paper} onChange={(paper) => setSettings({ paper })}
+            options={[{ id: 'canvas', label: '무한 캔버스' }, { id: 'a4', label: 'A4 세로' }, { id: 'a4-land', label: 'A4 가로' }]} />
         </div>
         <div className="set-row"><span>새 노트 배경</span>
           <select className="field sm" value={s.bg} onChange={(e) => setSettings({ bg: e.target.value as Bg })}>
