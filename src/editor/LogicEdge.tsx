@@ -11,6 +11,8 @@ export const LogicEdge = memo(function LogicEdge(p: EdgeProps<LogicEdgeT>) {
   const theme = useTheme()
   const d = { ...defaultEdge(), ...p.data }
   const editing = useEd((s) => s.editingEdge === p.id)
+  // 집합 안의 선은 높이(zIndex)가 올라가므로 라벨도 같은 높이로 (선 위, 상자 아래)
+  const z = useEd((s) => s.edges.find((e) => e.id === p.id)?.zIndex ?? 0)
   const args = { sourceX: p.sourceX, sourceY: p.sourceY, targetX: p.targetX, targetY: p.targetY, sourcePosition: p.sourcePosition, targetPosition: p.targetPosition }
   const [path, lx, ly] =
     d.kind === 'straight' ? getStraightPath(args) : d.kind === 'step' ? getSmoothStepPath({ ...args, borderRadius: 10, offset: d.offset ?? 20 }) : getBezierPath(args)
@@ -30,7 +32,7 @@ export const LogicEdge = memo(function LogicEdge(p: EdgeProps<LogicEdgeT>) {
       {(d.label || d.rel || editing) && (
         <EdgeLabelRenderer>
           <div className={`edge-label nodrag nopan${p.selected ? ' on' : ''}${d.rel && !d.label && !editing ? ' rel-only' : ''}`}
-            style={{ transform: `translate(-50%,-50%) translate(${lx}px,${ly}px)` }}
+            style={{ transform: `translate(-50%,-50%) translate(${lx}px,${ly}px)`, zIndex: z }}
             onDoubleClick={() => useEd.setState({ editingEdge: p.id })}>
             {d.rel && <span className="edge-rel" style={{ color: p.selected ? undefined : color }}><RelIcon rel={d.rel} size={14} width={1.9} /></span>}
             {editing ? <LabelInput id={p.id} value={d.label} /> : d.label}
