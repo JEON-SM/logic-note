@@ -5,11 +5,12 @@ import type { MermaidConfig } from 'mermaid'
 import { textVars } from './color'
 import { plain, uid } from './db'
 import { defaultBox, defaultEdge, outerSize } from './shapes'
-import type { BoxNode, EdgeData, LogicEdge, Shape } from './types'
+import type { BoxNode, EdgeData, LogicEdge, Rel, Shape } from './types'
 
 type Dir = 'TB' | 'BT' | 'LR' | 'RL'
-interface GNode { key: string; text: string; shape: Shape; fill?: string; stroke?: string; strokeWidth?: number; dash?: 'dashed' | 'none'; color?: string }
-interface GEdge { from: string; to: string; label: string; arrow: EdgeData['arrow']; dashed: boolean; width?: number; color?: string }
+/** parent: 감싸는 상자(Mermaid subgraph, Graphviz cluster) */
+interface GNode { key: string; text: string; shape: Shape; fill?: string; stroke?: string; strokeWidth?: number; dash?: 'dashed' | 'none'; color?: string; parent?: string }
+interface GEdge { from: string; to: string; label: string; rel?: Rel; arrow: EdgeData['arrow']; dashed: boolean; width?: number; color?: string }
 interface Graph { dir: Dir; title: string; nodes: GNode[]; edges: GEdge[] }
 export interface Imported { title: string; nodes: BoxNode[]; edges: LogicEdge[]; source: 'Mermaid' | 'Graphviz' }
 
@@ -18,6 +19,8 @@ export const AI_PROMPT = `아래 내용을 논리 도식으로 그려줘. 설명
 - 화살표에 필요하면 라벨을 붙여줘: A -->|이유| B
 - 한 상자 안에서 줄을 바꿀 땐 <br>
 - 상자에 설명을 덧붙일 땐 제목을 굵게 하고 따옴표로 감싸줘: A("<b>제목</b><br>설명")
+- 어떤 것이 다른 것에 포함되면(집합) subgraph로 감싸줘: subgraph S["포함하는 쪽"] … end
+- 같다·다르다 관계는 라벨 맨 앞에 = 또는 ≠: A ---|=| B
 
 내용: `
 
@@ -92,6 +95,12 @@ function labelHtml(text: string, color?: string) {
   return { title: head.map(para).join(''), body: rest.map(para).join('') }
 }
 
+/** 선 라벨 맨 앞의 =, ≠, ≈는 관계 기호로 */
+const splitRel = (label: string): { label: string; rel?: Rel } => {
+  const m = label.match(/^([=≠≈])(?:\s+|$)([\s\S]*)$/)
+  return m ? { rel: m[1] as Rel, label: m[2].trim() } : { label }
+}
+
 /** 글자 폭으로 상자 크기 추정 (실제 크기는 화면에서 다시 맞춰진다) */
 function estimate(shape: Shape, title: string, body: string) {
   const g = canvas(), font = getComputedStyle(document.body).fontFamily
@@ -154,19 +163,30 @@ async function parseMermaid(code: string): Promise<Graph> {
   const classes: Map<string, { styles: string[]; textStyles?: string[] }> = db.getClasses()
   const cls = (name: string) => [...(classes.get(name)?.styles ?? []), ...(classes.get(name)?.textStyles ?? [])]
   const verts: Map<string, { id: string; text?: string; type?: string; styles: string[]; classes: string[] }> = db.getVertices()
-  const groups = new Set((db.getSubGraphs() as { id: string }[]).map((s) => s.id))
+  // subgraph는 안에 상자가 든 상자(집합)로
+  const subs = db.getSubGraphs() as { id: string; title?: string; nodes: string[]; classes?: string[] }[]
+  const groups = new Set(subs.map((s) => s.id))
+  const parentOf = new Map<string, string>()
+  for (const s of subs) for (const c of s.nodes) if (c !== s.id) parentOf.set(c, s.id)
   const nodes = [...verts.values()].filter((v) => !groups.has(v.id)).map((v): GNode => ({
     key: v.id,
     text: v.text || v.id,
     shape: MERMAID_SHAPES[v.type ?? ''] ?? 'rect',
     ...boxStyle(styleMap([...cls('default'), ...v.classes.flatMap(cls), ...v.styles])),
     ...(v.type === 'text' ? { dash: 'none' as const } : {}),
+    parent: parentOf.get(v.id),
   }))
+  for (const s of subs) {
+    nodes.push({
+      key: s.id, text: s.title && s.title !== s.id ? s.title : '', shape: 'round', parent: parentOf.get(s.id),
+      ...boxStyle(styleMap([...(s.classes ?? []).flatMap(cls), ...(verts.get(s.id)?.styles ?? [])])),
+    })
+  }
   const keys = new Set(nodes.map((n) => n.key))
   const edges = (db.getEdges() as { start: string; end: string; type?: string; stroke?: string; text: string; style?: string[] }[])
     .filter((e) => keys.has(e.start) && keys.has(e.end) && e.stroke !== 'invisible')
     .map((e): GEdge => ({
-      from: e.start, to: e.end, label: decode(e.text ?? '').replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]+>/g, '').trim(),
+      from: e.start, to: e.end, ...splitRel(decode(e.text ?? '').replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]+>/g, '').trim()),
       arrow: e.type?.startsWith('double_') ? 'both' : e.type === 'arrow_open' ? 'none' : 'end',
       dashed: e.stroke === 'dotted', width: e.stroke === 'thick' ? 2.5 : undefined,
       color: toHex(styleMap(e.style ?? []).stroke),
@@ -190,27 +210,49 @@ async function parseDot(code: string): Promise<Graph> {
   const g = fromDot(code)
   type Attrs = { get(k: string): unknown }
   const get = (a: Attrs, k: string) => { const v = a.get(k); return v == null ? undefined : String(v) }
-  type Sub = { nodes: readonly { id: string; attributes: Attrs }[]; edges: readonly { targets: readonly unknown[]; attributes: Attrs }[]; subgraphs: readonly Sub[]; attributes: { node: Attrs; edge: Attrs } }
+  type Sub = Attrs & {
+    id?: string; nodes: readonly { id: string; attributes: Attrs }[]; edges: readonly { targets: readonly unknown[]; attributes: Attrs }[]
+    subgraphs: readonly Sub[]; attributes: { graph: Attrs; node: Attrs; edge: Attrs }
+  }
   const root = g as unknown as Sub
+
+  // HTML 라벨(<…>)은 바깥 꺾쇠를 벗기고, 따옴표 라벨은 \" \N \l 같은 이스케이프를 푼다
+  const nodeText = (label: string | undefined, id: string) =>
+    label && /^<[\s\S]*>$/.test(label) ? label.slice(1, -1)
+      : (label ?? id).replace(/\\N/g, id).replace(/\\[lr]/g, '\n').replace(/\\"/g, '"')
 
   const declared = new Map<string, { attrs: Attrs; defaults: Attrs }>()
   const rawEdges: { from: string; to: string; attrs: Attrs; defaults: Attrs }[] = []
+  // cluster로 시작하는 부분 그래프는 안에 상자가 든 상자(집합)로
+  const clusters: GNode[] = []
+  const parentOf = new Map<string, string>()
   const ids = (t: unknown): string[] => (Array.isArray(t) ? t.flatMap(ids) : [(t as { id: string }).id])
-  const walk = (s: Sub) => {
-    for (const n of s.nodes) declared.set(n.id, { attrs: n.attributes, defaults: s.attributes.node })
+  const walk = (s: Sub, cluster?: string) => {
+    const inside = (id: string) => { if (cluster && !parentOf.has(id)) parentOf.set(id, cluster) }
+    for (const n of s.nodes) { declared.set(n.id, { attrs: n.attributes, defaults: s.attributes.node }); inside(n.id) }
     for (const e of s.edges)
       for (let i = 0; i + 1 < e.targets.length; i++)
-        for (const a of ids(e.targets[i])) for (const b of ids(e.targets[i + 1])) rawEdges.push({ from: a, to: b, attrs: e.attributes, defaults: s.attributes.edge })
-    s.subgraphs.forEach(walk)
+        for (const a of ids(e.targets[i])) for (const b of ids(e.targets[i + 1])) {
+          rawEdges.push({ from: a, to: b, attrs: e.attributes, defaults: s.attributes.edge })
+          inside(a); inside(b)
+        }
+    for (const sub of s.subgraphs) {
+      if (!/^cluster/i.test(sub.id ?? '')) { walk(sub, cluster); continue }
+      const at = (k: string) => get(sub, k) ?? get(sub.attributes.graph, k)
+      const style = at('style') ?? ''
+      const label = at('label')
+      clusters.push({
+        key: sub.id!, text: label ? nodeText(label, '') : '', shape: /rounded/.test(style) ? 'round' : 'rect', parent: cluster,
+        fill: toHex(at('fillcolor') ?? (/filled/.test(style) ? at('color') : undefined)), stroke: toHex(at('pencolor') ?? at('color')),
+        dash: /dashed|dotted/.test(style) ? 'dashed' : undefined,
+      })
+      walk(sub, sub.id)
+    }
   }
   walk(root)
   for (const e of rawEdges) for (const id of [e.from, e.to]) if (!declared.has(id)) declared.set(id, { attrs: { get: () => undefined }, defaults: root.attributes.node })
 
   const pick = (x: { attrs: Attrs; defaults: Attrs }, k: string) => get(x.attrs, k) ?? get(x.defaults, k)
-  // HTML 라벨(<…>)은 바깥 꺾쇠를 벗기고, 따옴표 라벨은 \" \N \l 같은 이스케이프를 푼다
-  const nodeText = (label: string | undefined, id: string) =>
-    label && /^<[\s\S]*>$/.test(label) ? label.slice(1, -1)
-      : (label ?? id).replace(/\\N/g, id).replace(/\\[lr]/g, '\n').replace(/\\"/g, '"')
   const nodes = [...declared].map(([id, x]): GNode => {
     const style = pick(x, 'style') ?? ''
     const shapeName = pick(x, 'shape') ?? 'ellipse'
@@ -224,14 +266,20 @@ async function parseDot(code: string): Promise<Graph> {
       strokeWidth: snapWidth(pick(x, 'penwidth')),
       color: toHex(pick(x, 'fontcolor')),
       dash: /dashed|dotted/.test(style) ? 'dashed' : /invis/.test(style) || ['plaintext', 'plain', 'none'].includes(shapeName) ? 'none' : undefined,
+      parent: parentOf.get(id),
     }
   })
+  nodes.push(...clusters)
+  const clusterKeys = new Set(clusters.map((c) => c.key))
   const directed = (g as unknown as { directed: boolean }).directed
   const edges = rawEdges.map((e): GEdge => {
     const p = (k: string) => get(e.attrs, k) ?? get(e.defaults, k)
     const dir = p('dir') ?? (directed ? 'forward' : 'none')
+    // lhead/ltail: 선이 cluster 테두리에서 끝난다 = 바깥 상자에 잇는 선
+    const lt = p('ltail'), lh = p('lhead')
     return {
-      from: e.from, to: e.to, label: (p('label') ?? p('xlabel') ?? '').replace(/\\n/g, ' '),
+      from: lt && clusterKeys.has(lt) ? lt : e.from, to: lh && clusterKeys.has(lh) ? lh : e.to,
+      ...splitRel((p('label') ?? p('xlabel') ?? '').replace(/\\n/g, ' ')),
       arrow: dir === 'both' ? 'both' : dir === 'none' || p('arrowhead') === 'none' ? 'none' : 'end',
       dashed: /dashed|dotted/.test(p('style') ?? ''), width: snapWidth(p('penwidth')), color: toHex(p('color')),
     }
@@ -243,7 +291,7 @@ async function parseDot(code: string): Promise<Graph> {
 // ── 배치 ──
 async function layout(gr: Graph, kind: EdgeData['kind']): Promise<{ nodes: BoxNode[]; edges: LogicEdge[] }> {
   const { default: dagre } = await import('@dagrejs/dagre')
-  const dg = new dagre.graphlib.Graph({ multigraph: true })
+  const dg = new dagre.graphlib.Graph({ multigraph: true, compound: true })
   dg.setGraph({ rankdir: gr.dir, nodesep: 48, ranksep: 72, edgesep: 24 })
   dg.setDefaultEdgeLabel(() => ({}))
   const g2 = canvas()
@@ -252,7 +300,12 @@ async function layout(gr: Graph, kind: EdgeData['kind']): Promise<{ nodes: BoxNo
     return { n, id: uid(), title, body, size: estimate(n.shape, title, body) }
   })
   const idOf = new Map(built.map((b) => [b.n.key, b.id]))
-  for (const b of built) dg.setNode(b.id, { width: b.size.w, height: b.size.h })
+  // 집합(안에 상자가 있는 상자)은 dagre의 묶음 노드로: 크기는 안쪽 상자들로 정해진다
+  const sets = new Set(gr.nodes.filter((n) => n.parent && idOf.has(n.parent)).map((n) => n.parent!))
+  for (const b of built) dg.setNode(b.id, sets.has(b.n.key) ? {} : { width: b.size.w, height: b.size.h })
+  for (const b of built) if (b.n.parent && idOf.has(b.n.parent)) dg.setParent(b.id, idOf.get(b.n.parent)!)
+  // dagre는 묶음에 선을 잇지 못하니, 배치할 때만 안의 첫 상자에 잇는다
+  const leafKey = (k: string): string => { const c = gr.nodes.find((m) => m.parent === k); return c ? leafKey(c.key) : k }
   const edges0 = gr.edges.filter((e) => e.from !== e.to)
 
   // 순환(피드백 루프): 코드에 적힌 순서대로 따라가다 되돌아가는 선을 '되먹임 선'으로 정한다.
@@ -274,13 +327,16 @@ async function layout(gr: Graph, kind: EdgeData['kind']): Promise<{ nodes: BoxNo
   g2.font = `500 12px ${getComputedStyle(document.body).fontFamily}`
   edges0.forEach((e, i) => {
     const lw = e.label ? g2.measureText(e.label).width + 16 : 0
-    const [a, b] = back.has(i) ? [e.to, e.from] : [e.from, e.to]
-    dg.setEdge(idOf.get(a)!, idOf.get(b)!, { width: lw, height: e.label ? 20 : 0, labelpos: 'c' }, 'e' + i)
+    const [a, b] = (back.has(i) ? [e.to, e.from] : [e.from, e.to]).map(leafKey)
+    if (a !== b) dg.setEdge(idOf.get(a)!, idOf.get(b)!, { width: lw, height: e.label ? 20 : 0, labelpos: 'c' }, 'e' + i)
   })
   dagre.layout(dg)
 
   const pos = new Map<string, { x: number; y: number }>(built.map((b) => { const p = dg.node(b.id); return [b.id, { x: Math.round(p.x), y: Math.round(p.y) }] }))
-  const size = new Map<string, { w: number; h: number }>(built.map((b) => [b.id, b.size]))
+  const size = new Map<string, { w: number; h: number }>(built.map((b) => {
+    const p = dg.node(b.id)
+    return [b.id, sets.has(b.n.key) ? { w: Math.round(p.width ?? 0), h: Math.round(p.height ?? 0) } : b.size]
+  }))
   const vertical = gr.dir === 'TB' || gr.dir === 'BT'
 
   /** 되먹임 선: 두 상자의 같은 쪽 면에서 나가 다른 상자들을 비켜 돌아간다. 덜 돌아가는 쪽을 고른다 */
@@ -288,7 +344,7 @@ async function layout(gr: Graph, kind: EdgeData['kind']): Promise<{ nodes: BoxNo
   const detour = (s: string, t: string) => {
     const a = pos.get(s)!, b = pos.get(t)!, sa = size.get(s)!, sb = size.get(t)!
     const [lo, hi] = vertical ? [Math.min(a.y, b.y), Math.max(a.y, b.y)] : [Math.min(a.x, b.x), Math.max(a.x, b.x)]
-    const between = built.filter((n) => { const p = pos.get(n.id)!; const c = vertical ? p.y : p.x; return c >= lo && c <= hi })
+    const between = built.filter((n) => { const p = pos.get(n.id)!; const c = vertical ? p.y : p.x; return !sets.has(n.n.key) && c >= lo && c <= hi })
     const edge = (p: { x: number; y: number }, z: { w: number; h: number }, dir: -1 | 1) =>
       vertical ? p.x + (dir * z.w) / 2 : p.y + (dir * z.h) / 2
     const need = (dir: -1 | 1) => {
@@ -302,15 +358,16 @@ async function layout(gr: Graph, kind: EdgeData['kind']): Promise<{ nodes: BoxNo
     return { side, offset: Math.round(need(lowSide ? -1 : 1) - 16) }
   }
   const nodes = built.map((b): BoxNode => ({
-    id: b.id, type: 'box', position: pos.get(b.id)!, measured: { width: Math.round(b.size.w), height: Math.round(b.size.h) },
+    id: b.id, type: 'box', position: pos.get(b.id)!, measured: { width: size.get(b.id)!.w, height: size.get(b.id)!.h },
     data: {
       ...defaultBox(b.n.shape), title: b.title, body: b.body,
       fill: b.n.fill ?? null, stroke: b.n.stroke ?? null, strokeWidth: b.n.strokeWidth ?? 1.5, dash: b.n.dash ?? 'solid',
+      parent: b.n.parent ? idOf.get(b.n.parent) ?? null : null,
     },
   }))
   const edges = edges0.map((e, i): LogicEdge => {
     const s = idOf.get(e.from)!, t = idOf.get(e.to)!
-    const style = { ...defaultEdge(), kind, label: e.label, arrow: e.arrow, dashed: e.dashed, width: e.width ?? 1.5, color: e.color ?? null }
+    const style = { ...defaultEdge(), kind, label: e.label, rel: e.rel ?? null, arrow: e.arrow, dashed: e.dashed, width: e.width ?? 1.5, color: e.color ?? null }
     if (back.has(i)) {
       const { side, offset } = detour(s, t)
       return { id: uid(), type: 'logic', source: s, sourceHandle: side, target: t, targetHandle: side, data: { ...style, kind: 'step', offset } }

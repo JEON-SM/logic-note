@@ -5,7 +5,7 @@ import { HexColorInput, HexColorPicker } from 'react-colorful'
 import { PALETTE, themeMap } from '../lib/color'
 import { pushRecent, useSettings, useTheme } from '../lib/store'
 import { shapePath } from '../lib/shapes'
-import type { Shape } from '../lib/types'
+import type { Rel, Shape } from '../lib/types'
 
 export const cls = (...a: unknown[]) => a.filter(Boolean).join(' ')
 
@@ -31,6 +31,16 @@ export const ShapeIcon = ({ shape, size = 18 }: { shape: Shape; size?: number })
   )
 }
 
+/** 관계 기호 =, ≠, ≈ (글꼴마다 크기가 달라서 직접 그린다) */
+export const RelIcon = ({ rel, size = 14, width = 1.8 }: { rel: Rel; size?: number; width?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth={width} strokeLinecap="round" aria-label={rel}>
+    {rel === '≈'
+      ? <><path d="M2 5.4c1.7-1.7 3.3 1.7 5 0s3.3-1.7 5 0" /><path d="M2 9.6c1.7-1.7 3.3 1.7 5 0s3.3-1.7 5 0" /></>
+      : <><path d="M2.5 5H11.5" /><path d="M2.5 9H11.5" /></>}
+    {rel === '≠' && <path d="M9.6 1.8L4.4 12.2" />}
+  </svg>
+)
+
 type IBProps = ButtonHTMLAttributes<HTMLButtonElement> & { label: string; on?: boolean }
 /** 아이콘 버튼. mousedown 기본동작을 막아 편집 중인 텍스트의 포커스를 지킨다 */
 export const IB = ({ label, on, className, children, ...p }: IBProps) => (
@@ -40,6 +50,16 @@ export const IB = ({ label, on, className, children, ...p }: IBProps) => (
 )
 
 export const Sep = () => <span className="sep" />
+
+export function Segmented<T extends string>({ value, options, onChange }: { value: T; options: { id: T; label: string }[]; onChange: (v: T) => void }) {
+  return (
+    <div className="seg">
+      {options.map((o) => (
+        <button key={o.id} type="button" className={cls(value === o.id && 'on')} onClick={() => onChange(o.id)}>{o.label}</button>
+      ))}
+    </div>
+  )
+}
 
 export function Menu({ trigger, children, align = 'start', open, onOpenChange }: {
   trigger: ReactNode; children: ReactNode; align?: 'start' | 'end' | 'center'; open?: boolean; onOpenChange?: (o: boolean) => void

@@ -2,7 +2,8 @@ import { useMemo, useSyncExternalStore } from 'react'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { Theme } from './color'
-import type { Bg } from './types'
+import { BASE_DEFAULTS } from './shapes'
+import type { Bg, Defaults } from './types'
 
 export interface Settings {
   theme: 'system' | Theme
@@ -12,10 +13,14 @@ export interface Settings {
   sort: 'updated' | 'created' | 'title'
   previews: boolean
   expanded: string[]
+  /** 모든 노트의 새 상자·선 기본 모양 */
+  defaults: Defaults
 }
 
 export const useSettings = create<Settings>()(
-  persist((): Settings => ({ theme: 'system', bg: 'grid', recent: [], clientId: '', sort: 'updated', previews: true, expanded: [] }), { name: 'ln.settings' }),
+  persist((): Settings => ({
+    theme: 'system', bg: 'grid', recent: [], clientId: '', sort: 'updated', previews: true, expanded: [], defaults: BASE_DEFAULTS,
+  }), { name: 'ln.settings' }),
 )
 export const setSettings = (p: Partial<Settings>) => useSettings.setState(p)
 export const pushRecent = (c: string) =>

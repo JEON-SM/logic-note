@@ -1,6 +1,7 @@
 import { memo } from 'react'
 import { INK, SURFACE, themeMap, readable, type Theme } from '../lib/color'
 import { plain } from '../lib/db'
+import { hierarchy } from '../lib/sets'
 import { shapePath } from '../lib/shapes'
 import type { Note } from '../lib/types'
 
@@ -17,6 +18,7 @@ export const NoteThumb = memo(function NoteThumb({ note, theme }: { note: Note; 
   const pad = Math.max(24, (x1 - x0) * 0.06)
   const vb = `${x0 - pad} ${y0 - pad} ${Math.max(x1 - x0, 320) + pad * 2} ${Math.max(y1 - y0, 200) + pad * 2}`
   const c = (r: { x: number; y: number; w: number; h: number }) => [r.x + r.w / 2, r.y + r.h / 2]
+  const { kids, depth } = hierarchy(note.nodes)
   return (
     <svg className="thumb-svg" viewBox={vb} preserveAspectRatio="xMidYMid meet">
       {note.edges.map((e) => {
@@ -25,15 +27,17 @@ export const NoteThumb = memo(function NoteThumb({ note, theme }: { note: Note; 
         const [ax, ay] = c(a), [bx, by] = c(b)
         return <line key={e.id} x1={ax} y1={ay} x2={bx} y2={by} stroke={themeMap(e.data?.color ?? INK.light, theme)} strokeWidth={1} vectorEffect="non-scaling-stroke" />
       })}
-      {note.nodes.map((n) => {
-        const r = rects.get(n.id)!, d = n.data
-        const fill = d.fill ? themeMap(d.fill, theme) : SURFACE[theme]
+      {[...note.nodes].sort((a, b) => depth(a.id) - depth(b.id)).map((n) => {
+        const r = rects.get(n.id)!, d = n.data, set = kids.has(n.id)
+        // 집합은 바탕 없이 테두리만, 글은 위쪽에
+        const fill = d.fill ? themeMap(d.fill, theme) : set ? 'none' : SURFACE[theme]
         const text = plain(d.title) || plain(d.body)
         return (
           <g key={n.id} transform={`translate(${r.x} ${r.y})`}>
-            <path d={shapePath(d.shape, r.w, r.h)} fill={fill} stroke={d.dash === 'none' ? 'none' : themeMap(d.stroke ?? INK.light, theme)} strokeWidth={1} vectorEffect="non-scaling-stroke" />
+            <path d={shapePath(d.shape, r.w, r.h)} fill={fill} stroke={d.dash === 'none' ? 'none' : themeMap(d.stroke ?? INK.light, theme)} strokeWidth={set ? 2 : 1} vectorEffect="non-scaling-stroke" />
             {text && (
-              <text x={r.w / 2} y={r.h / 2} textAnchor="middle" dominantBaseline="central" fontSize={14} fontWeight={600} fill={readable('#1C1C1E', fill)}>
+              <text x={r.w / 2} y={set ? 22 : r.h / 2} textAnchor="middle" dominantBaseline="central" fontSize={14} fontWeight={600}
+                fill={readable('#1C1C1E', fill === 'none' ? SURFACE[theme] : fill)}>
                 {text.length > 22 ? text.slice(0, 21) + '…' : text}
               </text>
             )}

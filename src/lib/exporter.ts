@@ -2,8 +2,9 @@
 // 그림: html-to-image (React Flow 공식 문서가 권하는 방식) → PNG / SVG
 // 코드: Mermaid(직접 생성), Graphviz DOT(ts-graphviz의 toDot), AI용 개요(글)
 import { colorName } from './color'
-import type { EdgeAttributesObject, NodeAttributesObject } from 'ts-graphviz'
-import type { BoxNode, LogicEdge, Shape } from './types'
+import { hierarchy } from './sets'
+import type { EdgeAttributesObject, NodeAttributesObject, SubgraphAttributesObject } from 'ts-graphviz'
+import type { BoxNode, EdgeData, LogicEdge, Shape } from './types'
 
 // ── 공통 ──
 /** 서식 있는 글 → 줄 목록. 목록 항목엔 -, 1., [x] 표시를 붙인다 */
@@ -32,6 +33,8 @@ function lines(html: string): string[] {
 }
 const textOf = (n: BoxNode) => [...lines(n.data.title), ...lines(n.data.body)]
 const firstColor = (html: string) => html.match(/data-tc="(#[0-9A-Fa-f]{6})"/)?.[1]
+/** 선 라벨 앞에 관계 기호를 붙인다 (가져올 때 다시 떼어 낸다) */
+const edgeText = (d: EdgeData) => [d.rel, d.label].filter(Boolean).join(' ')
 
 /** 연결선이 주로 좌우로 이어지면 LR, 아니면 위→아래 */
 const direction = (edges: LogicEdge[]) => {
@@ -53,18 +56,30 @@ const mmLabel = (n: BoxNode) => {
 /** Claude·ChatGPT, Notion·GitHub·Obsidian이 읽을 수 있는 Mermaid flowchart */
 export function toMermaid(nodes: BoxNode[], edges: LogicEdge[]): string {
   const id = new Map(nodes.map((n, i) => [n.id, 'n' + (i + 1)]))
+  const byId = new Map(nodes.map((n) => [n.id, n]))
+  const { kids, parentOf } = hierarchy(nodes)
   const out = [`flowchart ${direction(edges)}`]
-  for (const n of nodes) {
+  // 집합(안에 상자가 있는 상자)은 subgraph로
+  const emit = (n: BoxNode, pad: string) => {
+    const cs = kids.get(n.id)
+    if (cs) {
+      out.push(`${pad}subgraph ${id.get(n.id)}["${mmLabel(n)}"]`)
+      for (const c of cs) emit(byId.get(c)!, pad + '  ')
+      out.push(`${pad}end`)
+      return
+    }
     const [a, b] = MM_SHAPE[n.data.shape]
-    out.push(`  ${id.get(n.id)}${a}"${mmLabel(n)}"${b}`)
+    out.push(`${pad}${id.get(n.id)}${a}"${mmLabel(n)}"${b}`)
   }
+  for (const n of nodes) if (!parentOf.has(n.id)) emit(n, '  ')
   const linked = edges.filter((e) => id.has(e.source) && id.has(e.target))
   for (const e of linked) {
     const d = e.data!, both = d.arrow === 'both', end = d.arrow === 'end'
     const link = d.dashed ? (both ? '<-.->' : end ? '-.->' : '-.-')
       : d.width >= 2.5 ? (both ? '<==>' : end ? '==>' : '===')
       : both ? '<-->' : end ? '-->' : '---'
-    out.push(`  ${id.get(e.source)} ${link}${d.label ? `|${mq(d.label)}|` : ''} ${id.get(e.target)}`)
+    const text = edgeText(d)
+    out.push(`  ${id.get(e.source)} ${link}${text ? `|${mq(text)}|` : ''} ${id.get(e.target)}`)
   }
   for (const n of nodes) {
     const d = n.data, st: string[] = []
@@ -95,27 +110,48 @@ const dotLabel = (n: BoxNode) => {
 
 export async function toDotCode(nodes: BoxNode[], edges: LogicEdge[]): Promise<string> {
   const { Digraph, toDot } = await import('ts-graphviz')
+  type Parent = Pick<InstanceType<typeof Digraph>, 'createNode' | 'createSubgraph'>
   const g = new Digraph()
   g.set('rankdir', direction(edges) === 'LR' ? 'LR' : 'TB')
   g.attributes.node.set('fontname', 'Pretendard')
   g.attributes.edge.set('fontname', 'Pretendard')
-  const byId = new Map(nodes.map((n, i) => {
+  const name = new Map(nodes.map((n, i) => [n.id, 'n' + (i + 1)]))
+  const byId = new Map(nodes.map((n) => [n.id, n]))
+  const { kids, parentOf } = hierarchy(nodes)
+  const made = new Map<string, ReturnType<Parent['createNode']>>()
+  // 집합은 cluster 부분 그래프로. 상자 글은 cluster 라벨이 된다
+  const make = (parent: Parent, n: BoxNode) => {
     const d = n.data
+    const cs = kids.get(n.id)
+    if (cs) {
+      const sub = parent.createSubgraph('cluster_' + name.get(n.id), defined({
+        label: dotLabel(n), style: [d.shape !== 'rect' && 'rounded', d.fill && 'filled', d.dash === 'dashed' && 'dashed'].filter(Boolean).join(',') || undefined,
+        fillcolor: d.fill ?? undefined, color: d.stroke ?? undefined, penwidth: d.dash === 'none' ? 0 : d.strokeWidth + 1,
+      }) as unknown as SubgraphAttributesObject)
+      for (const c of cs) make(sub, byId.get(c)!)
+      return
+    }
     const style = [d.shape === 'round' && 'rounded', d.fill && 'filled', d.dash === 'dashed' && 'dashed'].filter(Boolean).join(',')
-    return [n.id, g.createNode('n' + (i + 1), defined({
+    made.set(n.id, parent.createNode(name.get(n.id)!, defined({
       label: dotLabel(n), shape: DOT_SHAPE[d.shape], style: style || undefined,
       fillcolor: d.fill ?? undefined, color: d.stroke ?? undefined, fontcolor: firstColor(d.title),
       penwidth: d.dash === 'none' ? 0 : d.strokeWidth !== 1.5 ? d.strokeWidth : undefined,
-    }) as unknown as NodeAttributesObject)] as const
-  }))
+    }) as unknown as NodeAttributesObject))
+  }
+  for (const n of nodes) if (!parentOf.has(n.id)) make(g, n)
+  // Graphviz는 cluster에 바로 선을 잇지 못해서, 안의 첫 상자에 잇고 lhead/ltail로 cluster 테두리까지만 그린다
+  if (kids.size) g.set('compound', true)
+  const leaf = (id: string): string => (kids.has(id) ? leaf(kids.get(id)![0]) : id)
   for (const e of edges) {
-    const a = byId.get(e.source), b = byId.get(e.target)
-    if (!a || !b) continue
+    if (!byId.has(e.source) || !byId.has(e.target)) continue
     const d = e.data!
-    g.createEdge([a, b], defined({
-      label: d.label || undefined, style: d.dashed ? 'dashed' : undefined, color: d.color ?? undefined,
+    const text = edgeText(d)
+    g.createEdge([made.get(leaf(e.source))!, made.get(leaf(e.target))!], defined({
+      label: text || undefined, style: d.dashed ? 'dashed' : undefined, color: d.color ?? undefined,
       dir: d.arrow === 'both' ? 'both' : d.arrow === 'none' ? 'none' : undefined,
       penwidth: d.width !== 1.5 ? d.width : undefined,
+      ltail: kids.has(e.source) ? 'cluster_' + name.get(e.source) : undefined,
+      lhead: kids.has(e.target) ? 'cluster_' + name.get(e.target) : undefined,
     }) as unknown as EdgeAttributesObject)
   }
   return toDot(g)
@@ -150,7 +186,10 @@ export function toOutline(title: string, nodes: BoxNode[], edges: LogicEdge[]): 
   }
   const edgeMeta = (e: LogicEdge) => {
     const d = e.data!
-    const m = [d.label && `"${d.label.replace(/\s+/g, ' ').trim()}"`, d.dashed && '점선', d.width >= 2.5 && '굵은 선', d.color && colorName(d.color)].filter(Boolean)
+    const m = [
+      d.rel && `관계 ${d.rel}`, d.label && `"${d.label.replace(/\s+/g, ' ').trim()}"`,
+      d.dashed && '점선', d.width >= 2.5 && '굵은 선', d.color && colorName(d.color),
+    ].filter(Boolean)
     return m.length ? `  (선: ${m.join(', ')})` : ''
   }
 
@@ -173,6 +212,16 @@ export function toOutline(title: string, nodes: BoxNode[], edges: LogicEdge[]): 
     if (flow.length) flow.push('')
     visit(n, 0)
   }
+  // 포함 관계(집합): 바깥 상자부터 안쪽으로 들여쓴다
+  const { kids, parentOf } = hierarchy(nodes)
+  const sets: string[] = []
+  const setTree = (n: BoxNode, depth: number) => {
+    if (!num.has(n.id)) num.set(n.id, num.size + 1)
+    sets.push(`${'  '.repeat(depth)}${depth ? '⊃ ' : ''}[${num.get(n.id)}] ${name(n)}`)
+    for (const c of (kids.get(n.id) ?? []).map((id) => byId.get(id)!).sort(order)) setTree(c, depth + 1)
+  }
+  for (const n of sorted) if (kids.has(n.id) && !parentOf.has(n.id)) setTree(n, 0)
+
   const alone = sorted.filter((n) => !num.has(n.id))
   if (flow.length && alone.length) flow.push('')
   for (const n of alone) {
@@ -189,8 +238,8 @@ export function toOutline(title: string, nodes: BoxNode[], edges: LogicEdge[]): 
     ].filter(Boolean)
     const media = [['image', '이미지'], ['video', '영상']]
       .map(([k, label]) => [label, d.media.filter((m) => m.kind === k).length] as const).filter(([, c]) => c).map(([l, c]) => `${l} ${c}개`)
-    // 흐름에서 이미 다 보인 상자(제목뿐)는 다시 적지 않는다
-    if (linked.length && t && !body.length && !tags.length && !media.length) continue
+    // 흐름·포함 관계에서 이미 다 보인 상자(제목뿐)는 다시 적지 않는다
+    if ((linked.length || sets.length) && t && !body.length && !tags.length && !media.length) continue
     details.push(`[${num.get(n.id)}] ${t || '(제목 없음)'}${tags.length ? `  (상자: ${tags.join(', ')})` : ''}`)
     details.push(...body.map((l) => '    ' + l))
     if (media.length) details.push(`    (첨부: ${media.join(', ')} — 글로 옮기지 못함)`)
@@ -198,14 +247,18 @@ export function toOutline(title: string, nodes: BoxNode[], edges: LogicEdge[]): 
 
   const out = [
     `# ${title || '제목 없음'}`, '',
-    `Logic Note에서 내보낸 논리 도식 · 상자 ${nodes.length}개 · 연결 ${linked.length}개`,
+    `Logic Note에서 내보낸 논리 도식 · 상자 ${nodes.length}개 · 연결 ${linked.length}개${parentOf.size ? ` · 포함 관계 ${parentOf.size}개` : ''}`,
   ]
-  if (linked.length) out.push(
-    '읽는 법: [번호]는 상자. → 화살표, ↔ 양방향, — 방향 없는 선. (선: …)은 선에 붙은 말과 모양.',
-    '↺는 위에 이미 나온 상자로 다시 이어진다는 뜻(되먹임·합류).',
-    '', '## 흐름', '', ...flow,
-  )
-  if (details.length) out.push('', linked.length ? '## 상자 내용' : '## 상자', '', ...details)
+  if (linked.length || sets.length) out.push(...[
+    '읽는 법: [번호]는 상자.',
+    linked.length && '→ 화살표, ↔ 양방향, — 방향 없는 선. (선: …)은 선에 붙은 말과 모양.',
+    linked.length && '↺는 위에 이미 나온 상자로 다시 이어진다는 뜻(되먹임·합류).',
+    linked.some((e) => e.data?.rel) && '관계 =, ≠, ≈는 선으로 이은 두 상자가 같음·같지 않음·비슷함.',
+    sets.length && '⊃는 위 상자(집합)가 들여쓴 아래 상자를 포함한다는 뜻.',
+  ].filter((l): l is string => !!l))
+  if (linked.length) out.push('', '## 흐름', '', ...flow)
+  if (sets.length) out.push('', '## 포함 관계 (집합)', '', ...sets)
+  if (details.length) out.push('', linked.length || sets.length ? '## 상자 내용' : '## 상자', '', ...details)
   return out.join('\n')
 }
 

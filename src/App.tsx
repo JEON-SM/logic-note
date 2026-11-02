@@ -4,6 +4,7 @@ import { Library } from './library/Library'
 import { DialogHost } from './ui/Dialogs'
 import { SettingsDialog } from './ui/Settings'
 import { ImportDialog } from './ui/ImportDialog'
+import { Toast } from './ui/Toast'
 
 const Editor = lazy(() => import('./editor/Editor'))
 
@@ -22,6 +23,7 @@ export default function App() {
       <DialogHost />
       <SettingsDialog />
       <ImportDialog />
+      <Toast />
     </>
   )
 }

@@ -4,6 +4,7 @@ import { ACCENT, INK, themeMap } from '../lib/color'
 import { defaultEdge } from '../lib/shapes'
 import { useTheme } from '../lib/store'
 import type { LogicEdge as LogicEdgeT } from '../lib/types'
+import { RelIcon } from '../ui/kit'
 import { patchEdges, useEd } from './store'
 
 export const LogicEdge = memo(function LogicEdge(p: EdgeProps<LogicEdgeT>) {
@@ -26,10 +27,12 @@ export const LogicEdge = memo(function LogicEdge(p: EdgeProps<LogicEdgeT>) {
         markerEnd={d.arrow !== 'none' ? `url(#${mid})` : undefined}
         markerStart={d.arrow === 'both' ? `url(#${mid})` : undefined}
         style={{ stroke: color, strokeWidth: d.width, strokeDasharray: d.dashed ? '6 5' : undefined }} />
-      {(d.label || editing) && (
+      {(d.label || d.rel || editing) && (
         <EdgeLabelRenderer>
-          <div className={`edge-label nodrag nopan${p.selected ? ' on' : ''}`} style={{ transform: `translate(-50%,-50%) translate(${lx}px,${ly}px)` }}
+          <div className={`edge-label nodrag nopan${p.selected ? ' on' : ''}${d.rel && !d.label && !editing ? ' rel-only' : ''}`}
+            style={{ transform: `translate(-50%,-50%) translate(${lx}px,${ly}px)` }}
             onDoubleClick={() => useEd.setState({ editingEdge: p.id })}>
+            {d.rel && <span className="edge-rel" style={{ color: p.selected ? undefined : color }}><RelIcon rel={d.rel} size={14} width={1.9} /></span>}
             {editing ? <LabelInput id={p.id} value={d.label} /> : d.label}
           </div>
         </EdgeLabelRenderer>

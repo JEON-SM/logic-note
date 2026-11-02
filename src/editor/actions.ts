@@ -2,6 +2,7 @@ import type { XYPosition } from '@xyflow/react'
 import { addMediaFile, isUrl } from '../lib/media'
 import { promptText } from '../ui/Dialogs'
 import { looksLikeDiagram, parseDiagram, type Imported } from '../lib/diagram'
+import { looksLikeMarkdown, markdownToHtml } from '../lib/rich'
 import type { MediaItem } from '../lib/types'
 import { openImport } from '../ui/ImportDialog'
 import { addBox, addLink, commit, patchNodes, selectedNodes, startEditing, useEd } from './store'
@@ -39,8 +40,12 @@ export async function insertLink(url?: string, at?: XYPosition) {
   else addBox(at ?? center(), 'round', { body: html })
 }
 
-export const insertText = (text: string, at?: XYPosition) =>
-  addBox(at ?? center(), 'rect', { body: text.split(/\r?\n/).map((l) => `<p>${esc(l)}</p>`).join('') })
+/** 붙여넣은 글로 상자 만들기. 마크다운이면 서식으로 바꾸고, 첫 줄이 '# 제목'이면 상자 제목으로 */
+export function insertText(text: string, at?: XYPosition) {
+  if (!looksLikeMarkdown(text)) return addBox(at ?? center(), 'rect', { body: text.split(/\r?\n/).map((l) => `<p>${esc(l)}</p>`).join('') })
+  const m = text.match(/^\s*#{1,6}\s+(.+)\r?\n?([\s\S]*)$/)
+  return addBox(at ?? center(), 'rect', { title: m ? `<p>${esc(m[1].trim())}</p>` : '', body: markdownToHtml(m ? m[2] : text) })
+}
 
 /** 선택한 상자 옆에 연결된 새 상자 (Tab) */
 export function addChild() {

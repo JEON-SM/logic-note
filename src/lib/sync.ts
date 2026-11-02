@@ -139,7 +139,10 @@ export async function sync() {
       const lid = rf.appProperties!.lid, u = +rf.appProperties!.u
       const lf = await db.folders.get(lid)
       if (!lf || (u > (lf.syncedAt ?? 0) && (!dirty(lf) || u >= lf.updatedAt)))
-        await db.folders.put({ id: lid, name: rf.name, parentId: parentLid(rf), createdAt: lf?.createdAt ?? u, updatedAt: u, driveId: rf.id, syncedAt: u, dirty: 0 })
+        await db.folders.put({
+          id: lid, name: rf.name, parentId: parentLid(rf), ...(rf.appProperties!.g === '1' && { group: 1 }),
+          createdAt: lf?.createdAt ?? u, updatedAt: u, driveId: rf.id, syncedAt: u, dirty: 0,
+        })
     }
     // ── 폴더: 원격에서 사라진 것
     for (const lf of await db.folders.toArray())
@@ -155,7 +158,8 @@ export async function sync() {
       if (lf.driveId && !dirty(lf)) continue
       const parent = (lf.parentId && (await db.folders.get(lf.parentId))?.driveId) || dirs.root
       const u = nextU(lf.updatedAt, byLid.get(lf.id))
-      const meta = { name: lf.name, appProperties: { ln: 'folder', lid: lf.id, u: String(u) } }
+      // 그룹은 Drive에서도 폴더로 두고 g 표시만 단다
+      const meta = { name: lf.name, appProperties: { ln: 'folder', lid: lf.id, u: String(u), ...(lf.group ? { g: '1' } : {}) } }
       if (!lf.driveId) {
         const r = await json('/drive/v3/files?fields=id', jsonBody({ ...meta, mimeType: FOLDER, parents: [parent] }))
         await settle(db.folders, lf.id, lf.updatedAt, u, { driveId: r.id })

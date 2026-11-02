@@ -2,14 +2,14 @@ import { useState, type ReactNode } from 'react'
 import { Dialog } from 'radix-ui'
 import { create } from 'zustand'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { Folder as FolderIcon, Home } from 'lucide-react'
+import { Folder as FolderIcon, Home, Layers } from 'lucide-react'
 import { db } from '../lib/db'
 import { cls } from './kit'
 
 type D =
   | { kind: 'prompt'; title: string; value: string; ok: string; resolve: (v: string | null) => void }
   | { kind: 'confirm'; title: string; message?: string; ok: string; resolve: (v: boolean) => void }
-  | { kind: 'folder'; title: string; exclude?: string; resolve: (v: string | null | undefined) => void }
+  | { kind: 'folder'; title: string; exclude?: string; forNote?: boolean; resolve: (v: string | null | undefined) => void }
 
 const useDialog = create<{ d: D | null }>(() => ({ d: null }))
 const open = (d: D) => useDialog.setState({ d })
@@ -18,9 +18,9 @@ export const promptText = (title: string, value = '', ok = '확인') =>
   new Promise<string | null>((resolve) => open({ kind: 'prompt', title, value, ok, resolve }))
 export const confirmDanger = (title: string, message?: string, ok = '삭제') =>
   new Promise<boolean>((resolve) => open({ kind: 'confirm', title, message, ok, resolve }))
-/** undefined = 취소, null = 최상위 */
-export const pickFolder = (title: string, exclude?: string) =>
-  new Promise<string | null | undefined>((resolve) => open({ kind: 'folder', title, exclude, resolve }))
+/** undefined = 취소, null = 최상위. forNote: 노트를 옮길 때 (그룹은 고를 수 없음) */
+export const pickFolder = (title: string, exclude?: string, forNote = false) =>
+  new Promise<string | null | undefined>((resolve) => open({ kind: 'folder', title, exclude, forNote, resolve }))
 
 export function Modal({ open, onClose, title, children, wide }: { open: boolean; onClose: () => void; title: string; children: ReactNode; wide?: boolean }) {
   return (
@@ -53,7 +53,7 @@ export function DialogHost() {
           </div>
         </>
       )}
-      {d.kind === 'folder' && <FolderBody exclude={d.exclude} close={close} />}
+      {d.kind === 'folder' && <FolderBody exclude={d.exclude} forNote={d.forNote} close={close} />}
     </Modal>
   )
 }
@@ -71,13 +71,13 @@ function PromptBody({ d, close }: { d: Extract<D, { kind: 'prompt' }>; close: (v
   )
 }
 
-function FolderBody({ exclude, close }: { exclude?: string; close: (v: unknown) => void }) {
+function FolderBody({ exclude, forNote, close }: { exclude?: string; forNote?: boolean; close: (v: unknown) => void }) {
   const folders = useLiveQuery(() => db.folders.toArray(), [])?.filter((f) => !f.deleted) ?? []
-  const rows: { id: string; name: string; depth: number }[] = []
+  const rows: { id: string; name: string; depth: number; group?: number }[] = []
   const walk = (parent: string | null, depth: number) => {
-    for (const f of folders.filter((x) => x.parentId === parent).sort((a, b) => a.name.localeCompare(b.name))) {
+    for (const f of folders.filter((x) => x.parentId === parent).sort((a, b) => (a.group ?? 0) - (b.group ?? 0) || a.name.localeCompare(b.name))) {
       if (f.id === exclude) continue
-      rows.push({ id: f.id, name: f.name, depth })
+      rows.push({ id: f.id, name: f.name, depth, group: f.group })
       walk(f.id, depth + 1)
     }
   }
@@ -86,8 +86,8 @@ function FolderBody({ exclude, close }: { exclude?: string; close: (v: unknown) 
     <div className="folder-pick">
       <button className="tree-row" onClick={() => close(null)}><Home size={16} /> <span>최상위</span></button>
       {rows.map((r) => (
-        <button key={r.id} className="tree-row" style={{ paddingLeft: 12 + r.depth * 16 }} onClick={() => close(r.id)}>
-          <FolderIcon size={16} /> <span>{r.name}</span>
+        <button key={r.id} className="tree-row" style={{ paddingLeft: 12 + r.depth * 16 }} disabled={forNote && !!r.group} onClick={() => close(r.id)}>
+          {r.group ? <Layers size={16} /> : <FolderIcon size={16} />} <span>{r.name}</span>
         </button>
       ))}
     </div>

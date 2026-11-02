@@ -19,12 +19,18 @@ let listener = () => {}
 export const onLocalChange = (fn: () => void) => { listener = fn }
 const changed = () => listener()
 
-export async function createFolder(name: string, parentId: string | null) {
+export async function createFolder(name: string, parentId: string | null, group = false) {
   const t = Date.now()
-  const f: Folder = { id: uid(), name, parentId, createdAt: t, updatedAt: t, dirty: 1 }
+  const f: Folder = { id: uid(), name, parentId: group ? null : parentId, ...(group && { group: 1 }), createdAt: t, updatedAt: t, dirty: 1 }
   await db.folders.add(f)
   changed()
   return f
+}
+
+/** 그룹 해제: 안의 폴더는 최상위로 꺼내고 그룹만 지운다 */
+export async function ungroup(id: string) {
+  for (const f of await db.folders.where('parentId').equals(id).toArray()) await updateFolder(f.id, { parentId: null })
+  await deleteFolder(id)
 }
 
 export async function updateFolder(id: string, patch: Partial<Folder>) {
@@ -50,6 +56,9 @@ export async function deleteFolder(id: string) {
   })
   changed()
 }
+
+/** 이번에 '새 노트'로 만든 노트. 아무것도 안 하고 나가면 지운다 */
+export const freshNotes = new Set<string>()
 
 export async function createNote(folderId: string | null) {
   const t = Date.now()

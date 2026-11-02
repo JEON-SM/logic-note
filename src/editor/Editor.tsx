@@ -4,23 +4,25 @@ import {
   type Connection, type FinalConnectionState, type Viewport,
 } from '@xyflow/react'
 import { useShallow } from 'zustand/react/shallow'
-import { ArrowLeft, Check, Grid3x3, Import, Maximize, Share, Minus, MoreVertical, Plus, Redo2, Trash2, Undo2 } from 'lucide-react'
+import { ArrowLeft, Check, Grid3x3, Import, Maximize, Share, Minus, MoreVertical, Palette, Plus, Redo2, Trash2, Undo2 } from 'lucide-react'
 import { CANVAS } from '../lib/color'
-import { db, updateNote } from '../lib/db'
+import { db, freshNotes, purgeNote, updateNote } from '../lib/db'
 import { isUrl } from '../lib/media'
 import { go, useSettings, useTheme } from '../lib/store'
 import { remoteEvents } from '../lib/sync'
 import type { Bg, LogicEdge as LogicEdgeT } from '../lib/types'
 import { IB, Item, Menu, MenuSep } from '../ui/kit'
 import { BGS, SyncButton } from '../ui/Settings'
+import { toast } from '../ui/Toast'
 import { addChild, importDiagramText, insertFiles, insertLink, insertText, looksLikeDiagram, openImportHere, setCenterFn, setFitFn } from './actions'
 import { BoxNode } from './BoxNode'
+import { DefaultsDialog, openDefaults } from './DefaultsDialog'
 import { LogicEdge } from './LogicEdge'
 import { Toolbar } from './Toolbar'
 import { ExportDialog, openExport } from './ExportDialog'
 import {
-  CLIP_MARK, addBox, addLink, commit, copySelection, flushSave, hasClip, loadNote, onEdgesChange, onNodesChange, pasteClip, redo,
-  startEditing, stopEditing, undo, useEd,
+  CLIP_MARK, addBox, addLink, commit, copySelection, dragOver, finishDrag, flushSave, groupSelection, hasClip, loadNote, onEdgesChange,
+  onNodesChange, pasteClip, redo, selectedNodes, startDrag, startEditing, stopEditing, takeOut, undo, useEd,
 } from './store'
 
 const nodeTypes = { box: BoxNode }
@@ -34,11 +36,13 @@ const BG: Record<Bg, { variant: BackgroundVariant; gap: number; size?: number } 
 }
 const isEditable = (t: EventTarget | null) => t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))
 const OPPOSITE: Record<string, string> = { t: 'b', b: 't', l: 'r', r: 'l' }
+const openIds = new Set<string>()
 
 export default function EditorPage({ id }: { id: string }) {
   const [ready, setReady] = useState<{ viewport?: Viewport } | null>(null)
   useEffect(() => {
     let alive = true
+    openIds.add(id)
     db.notes.get(id).then((n) => {
       if (!alive) return
       if (!n || n.deleted) return go('#/')
@@ -51,7 +55,21 @@ export default function EditorPage({ id }: { id: string }) {
       db.notes.get(id).then((n) => n && loadNote(n))
     }
     remoteEvents.addEventListener('note', onRemote)
-    return () => { alive = false; remoteEvents.removeEventListener('note', onRemote); flushSave(); useEd.setState({ noteId: '' }) }
+    return () => {
+      alive = false
+      openIds.delete(id)
+      remoteEvents.removeEventListener('note', onRemote)
+      flushSave()
+      const s = useEd.getState()
+      const blank = s.noteId === id && !s.nodes.length && !s.title.trim()
+      useEd.setState({ noteId: '' })
+      // 새로 만들고 아무것도 안 한 노트는 나갈 때 지운다 (같은 노트를 바로 다시 연 경우는 제외)
+      if (blank && freshNotes.has(id)) setTimeout(() => {
+        if (openIds.has(id)) return
+        freshNotes.delete(id)
+        purgeNote(id).then(() => toast('빈 노트라서 지웠어요'))
+      }, 0)
+    }
   }, [id])
   if (!ready) return <div className="editor" />
   return (
@@ -60,6 +78,7 @@ export default function EditorPage({ id }: { id: string }) {
         <TopBar id={id} />
         <Toolbar />
         <ExportDialog />
+        <DefaultsDialog />
         <Canvas id={id} viewport={ready.viewport} />
       </div>
     </ReactFlowProvider>
@@ -83,6 +102,7 @@ function TopBar({ id }: { id: string }) {
       <Menu align="end" trigger={<IB label="더보기"><MoreVertical size={18} strokeWidth={1.6} /></IB>}>
         <Item icon={<Share size={15} />} onSelect={openExport}>내보내기 (그림·AI용 글·코드)</Item>
         <Item icon={<Import size={15} />} onSelect={() => openImportHere()}>AI 도식 가져오기</Item>
+        <Item icon={<Palette size={15} />} onSelect={openDefaults}>기본 모양 (새 상자·선)</Item>
         <Item icon={<Check size={15} />} onSelect={() => useSettings.setState({ bg })}>이 배경을 기본으로</Item>
         <MenuSep />
         <Item icon={<Trash2 size={15} />} danger onSelect={async () => { flushSave(); await updateNote(id, { trashed: 1 }); go('#/') }}>노트 삭제</Item>
@@ -115,6 +135,7 @@ function Canvas({ id, viewport }: { id: string; viewport?: Viewport }) {
       else if (mod && k === 'c') { if (copySelection()) navigator.clipboard?.writeText(CLIP_MARK).catch(() => {}) }
       else if (mod && k === 'd') { e.preventDefault(); if (copySelection()) pasteClip() }
       else if (mod && k === 'a') { e.preventDefault(); useEd.setState((s) => ({ nodes: s.nodes.map((n) => ({ ...n, selected: true })) })) }
+      else if (mod && k === 'g') { e.preventDefault(); e.shiftKey ? takeOut(selectedNodes().map((n) => n.id)) : groupSelection() }
       else if (e.key === 'Tab') { e.preventDefault(); addChild() }
       else if (e.key === 'Enter') {
         const sel = useEd.getState().nodes.filter((n) => n.selected)
@@ -181,6 +202,17 @@ function Canvas({ id, viewport }: { id: string; viewport?: Viewport }) {
     if (!(e.target as HTMLElement).classList.contains('react-flow__pane')) return
     startEditing(addBox(toFlow(e.clientX, e.clientY), shape))
   }
+  // 집합 안의 빈 곳을 두 번 누르거나, 도형을 고른 채 상자를 누르면 그 안에 새 상자
+  const addInside = (e: React.MouseEvent, parent: string) => {
+    const nid = addBox(toFlow(e.clientX, e.clientY), shape, { parent })
+    useEd.setState({ tool: 'hand' })
+    startEditing(nid)
+  }
+  const onNodeDoubleClick = (e: React.MouseEvent, id: string) => {
+    const onText = (e.target as HTMLElement).closest('.box-content')
+    if (useEd.getState().frames[id] && !onText) addInside(e, id)
+    else startEditing(id)
+  }
   const onDrop = async (e: DragEvent) => {
     e.preventDefault()
     const at = toFlow(e.clientX, e.clientY)
@@ -206,9 +238,18 @@ function Canvas({ id, viewport }: { id: string; viewport?: Viewport }) {
         panOnScroll={false} zoomOnDoubleClick={false} minZoom={0.1} maxZoom={4}
         deleteKeyCode={['Backspace', 'Delete']} multiSelectionKeyCode={['Shift', 'Meta', 'Control']}
         onBeforeDelete={async () => { commit(); return true }}
-        onNodeDragStart={() => commit()}
-        onNodeDoubleClick={(_, n) => startEditing(n.id)}
-        onNodeClick={(_, n) => { if (useEd.getState().editingId !== n.id) stopEditing() }}
+        elevateNodesOnSelect={false}
+        onNodeDragStart={(_, __, ns) => startDrag(ns.map((n) => n.id))}
+        onNodeDrag={(_, n) => dragOver(n.id)}
+        onNodeDragStop={(_, __, ns) => finishDrag(ns.map((n) => n.id))}
+        onSelectionDragStart={(_, ns) => startDrag(ns.map((n) => n.id))}
+        onSelectionDrag={(_, ns) => ns[0] && dragOver(ns[0].id)}
+        onSelectionDragStop={(_, ns) => finishDrag(ns.map((n) => n.id))}
+        onNodeDoubleClick={(e, n) => onNodeDoubleClick(e, n.id)}
+        onNodeClick={(e, n) => {
+          if (tool === 'place') return addInside(e, n.id)
+          if (useEd.getState().editingId !== n.id) stopEditing()
+        }}
         onEdgeDoubleClick={(_, ed) => useEd.setState({ editingEdge: ed.id })}
         onPaneClick={onPaneClick}
         onMoveEnd={(_, vp) => updateNote(id, { viewport: vp }, false)}

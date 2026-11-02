@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { create } from 'zustand'
 import { AI_PROMPT, parseDiagram, type Imported } from '../lib/diagram'
 import { createNote, updateNote } from '../lib/db'
-import { go, useTheme } from '../lib/store'
+import { go, useSettings, useTheme } from '../lib/store'
 import type { Note } from '../lib/types'
 import { NoteThumb } from '../library/NoteThumb'
 import { Modal } from './Dialogs'
@@ -25,7 +25,7 @@ export function ImportDialog() {
     setErr('')
     if (!text.trim()) return
     let alive = true
-    const t = setTimeout(() => parseDiagram(text).then((r) => alive && setRes(r), (e) => alive && setErr(e.message)), 300)
+    const t = setTimeout(() => parseDiagram(text, useSettings.getState().defaults.edge.kind).then((r) => alive && setRes(r), (e) => alive && setErr(e.message)), 300)
     return () => { alive = false; clearTimeout(t) }
   }, [text])
 

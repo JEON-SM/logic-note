@@ -1,19 +1,21 @@
+import { useState } from 'react'
 import { useReactFlow } from '@xyflow/react'
 import { useEditorState } from '@tiptap/react'
 import { useShallow } from 'zustand/react/shallow'
 import {
   AlignCenter, AlignLeft, AlignRight, Baseline, Bold, CornerDownRight, Copy, Film, Hand, Highlighter, ImagePlus, Italic,
   Link2, List, ListChecks, ListOrdered, MoreHorizontal, MousePointer2, PaintBucket, Spline, Square, Strikethrough, Tag,
-  Trash2, Type, Underline, GitBranchPlus, Eye, EyeOff, MoveHorizontal,
+  Trash2, Type, Underline, GitBranchPlus, Eye, EyeOff, MoveHorizontal, Group, Ungroup, Palette,
 } from 'lucide-react'
 import { HIGHLIGHTS } from '../lib/color'
 import { pickFiles } from '../lib/media'
-import { FONTS, SIZES } from '../lib/rich'
-import { SHAPES, defaultBox, defaultEdge } from '../lib/shapes'
+import { FONTS, SIZES, parseSize, sizeInPt } from '../lib/rich'
+import { RELS, SHAPES, defaultBox, defaultEdge } from '../lib/shapes'
 import type { EdgeData } from '../lib/types'
-import { ColorButton, IB, Item, Menu, MenuSep, Sep, ShapeIcon } from '../ui/kit'
+import { ColorButton, IB, Item, Menu, MenuSep, Pop, RelIcon, Sep, ShapeIcon, cls } from '../ui/kit'
 import { addChild, insertFiles, insertLink } from './actions'
-import { copySelection, fmt, pasteClip, patchEdges, patchNodes, useEd } from './store'
+import { openDefaults } from './DefaultsDialog'
+import { copySelection, fmt, groupSelection, pasteClip, patchEdges, patchNodes, takeOut, useEd } from './store'
 
 const S = { size: 18, strokeWidth: 1.6 }
 
@@ -54,6 +56,8 @@ function CreateTools() {
       <Sep />
       <Menu trigger={<IB label="새 연결선 모양"><LineIcon kind={edgeStyle.kind} arrow={edgeStyle.arrow} dashed={edgeStyle.dashed} /></IB>}>
         <EdgeStyleItems d={edgeStyle} set={setStyle} />
+        <MenuSep />
+        <Item icon={<Palette size={16} />} onSelect={openDefaults}>기본 모양 설정…</Item>
       </Menu>
       <Sep />
       <IB label="이미지" onClick={async () => insertFiles(await pickFiles('image/*'))}><ImagePlus {...S} /></IB>
@@ -91,9 +95,37 @@ function useActiveMarks() {
   })
 }
 
+/** 글자 크기: 목록에서 고르거나 '10p'처럼 직접 입력 (단위 없으면 pt) */
+function SizePicker({ current }: { current?: string }) {
+  const pt = sizeInPt(current)
+  const [v, setV] = useState('')
+  const [bad, setBad] = useState(false)
+  const apply = (css: string | null) => fmt((c) => (css ? c.setFontSize(css) : c.unsetFontSize()))
+  return (
+    <Pop trigger={<button type="button" className="ib size-btn" title="글자 크기 (pt)" onMouseDown={(e) => e.preventDefault()}>{pt ?? 'Aa'}</button>}>
+      <form className="size-pop" onSubmit={(e) => {
+        e.preventDefault()
+        const css = parseSize(v)
+        setBad(!css)
+        if (css) { apply(css); setV('') }
+      }}>
+        <input className={cls('field sm', bad && 'bad')} inputMode="decimal" placeholder="직접 입력 (예: 10p)" value={v}
+          onChange={(e) => { setV(e.target.value); setBad(false) }} />
+        <div className="size-list">
+          <button type="button" className={cls(!current && 'on')} onMouseDown={(e) => e.preventDefault()} onClick={() => apply(null)}>기본</button>
+          {SIZES.map((n) => (
+            <button key={n} type="button" className={cls(pt === n && 'on')} onMouseDown={(e) => e.preventDefault()} onClick={() => apply(`${n}pt`)}>{n}</button>
+          ))}
+        </div>
+      </form>
+    </Pop>
+  )
+}
+
 function NodeTools({ ids }: { ids: string[] }) {
   const rf = useReactFlow()
   const first = useEd((s) => s.nodes.find((n) => n.id === ids[0])?.data) ?? defaultBox('rect')
+  const inSet = useEd((s) => s.nodes.some((n) => ids.includes(n.id) && n.data.parent && s.nodes.some((p) => p.id === n.data.parent)))
   const m = useActiveMarks()
   const hasLinks = /href=/.test(first.body)
   return (
@@ -118,10 +150,7 @@ function NodeTools({ ids }: { ids: string[] }) {
           </Item>
         ))}
       </Menu>
-      <Menu trigger={<button type="button" className="ib size-btn" title="글자 크기" onMouseDown={(e) => e.preventDefault()}>{m?.size ? parseInt(m.size) : 'Aa'}</button>}>
-        <Item checked={!m?.size} onSelect={() => fmt((c) => c.unsetFontSize())}>기본</Item>
-        {SIZES.map((n) => <Item key={n} checked={m?.size === `${n}px`} onSelect={() => fmt((c) => c.setFontSize(`${n}px`))}>{n}</Item>)}
-      </Menu>
+      <SizePicker current={m?.size} />
       <IB label="굵게 (Ctrl+B)" on={m?.bold} onClick={() => fmt((c) => c.toggleBold())}><Bold {...S} /></IB>
       <IB label="기울임 (Ctrl+I)" on={m?.italic} onClick={() => fmt((c) => c.toggleItalic())}><Italic {...S} /></IB>
       <IB label="밑줄 (Ctrl+U)" on={m?.underline} onClick={() => fmt((c) => c.toggleUnderline())}><Underline {...S} /></IB>
@@ -145,6 +174,8 @@ function NodeTools({ ids }: { ids: string[] }) {
       <IB label="링크 넣기" onClick={() => insertLink()}><Link2 {...S} /></IB>
       <Menu align="end" trigger={<IB label="더보기"><MoreHorizontal {...S} /></IB>}>
         <Item icon={<GitBranchPlus size={16} />} onSelect={addChild}>연결된 상자 추가 (Tab)</Item>
+        <Item icon={<Group size={16} />} onSelect={groupSelection}>집합으로 묶기 (Ctrl+G)</Item>
+        {inSet && <Item icon={<Ungroup size={16} />} onSelect={() => takeOut(ids)}>집합에서 꺼내기</Item>}
         <Item icon={<Copy size={16} />} onSelect={() => { copySelection(); pasteClip() }}>복제 (Ctrl+D)</Item>
         <Item icon={<MoveHorizontal size={16} />} onSelect={() => patchNodes(ids, { wrap: null })}>폭 자동 맞춤</Item>
         <Item icon={<Film size={16} />} onSelect={async () => insertFiles(await pickFiles('video/*'))}>영상 넣기</Item>
@@ -173,6 +204,10 @@ function EdgeTools({ ids }: { ids: string[] }) {
       <IB label="양방향" on={d.arrow === 'both'} onClick={() => set({ arrow: 'both' })}><LineIcon arrow="both" /></IB>
       <IB label="선만" on={d.arrow === 'none'} onClick={() => set({ arrow: 'none' })}><LineIcon /></IB>
       <IB label="점선" on={d.dashed} onClick={() => set({ dashed: !d.dashed })}><LineIcon dashed /></IB>
+      <Menu trigger={<IB label="관계 기호 (=, ≠, ≈)" on={!!d.rel} className="rel-btn"><RelIcon rel={d.rel ?? '='} size={18} width={1.6} /></IB>}>
+        <Item checked={!d.rel} onSelect={() => set({ rel: null })}>기호 없음</Item>
+        {RELS.map((r) => <Item key={r.id} icon={<RelIcon rel={r.id} size={16} />} checked={d.rel === r.id} onSelect={() => set({ rel: r.id })}>{r.id} {r.label}</Item>)}
+      </Menu>
       <Sep />
       <ColorButton label="선 색" icon={<Spline {...S} />} value={d.color} none="기본" onChange={(color) => set({ color })} />
       <Menu trigger={<button type="button" className="ib size-btn" title="두께">{d.width}</button>}>

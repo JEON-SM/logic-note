@@ -1,4 +1,4 @@
-import type { BoxData, EdgeData, Shape } from './types'
+import type { BoxData, Defaults, EdgeData, Rel, Shape } from './types'
 
 export const SHAPES: { id: Shape; label: string }[] = [
   { id: 'rect', label: '사각형' },
@@ -39,3 +39,15 @@ export const defaultBox = (shape: Shape): BoxData => ({
 })
 
 export const defaultEdge = (): EdgeData => ({ kind: 'bezier', arrow: 'end', dashed: false, color: null, width: 1.5, label: '' })
+
+/** 처음 설치했을 때의 기본 모양: 사각형, 기본 색, 직선 화살표 */
+export const BASE_DEFAULTS: Defaults = {
+  shape: 'rect', fill: null, stroke: null,
+  edge: { kind: 'straight', arrow: 'end', dashed: false, color: null, width: 1.5 },
+}
+
+export const RELS: { id: Rel; label: string }[] = [
+  { id: '=', label: '같음' },
+  { id: '≠', label: '같지 않음' },
+  { id: '≈', label: '비슷함' },
+]

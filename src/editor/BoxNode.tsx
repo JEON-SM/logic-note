@@ -2,55 +2,65 @@ import { memo, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, ty
 import { Handle, Position, useStore, type NodeProps } from '@xyflow/react'
 import { EditorContent, useEditor } from '@tiptap/react'
 import { Play, X } from 'lucide-react'
-import { ACCENT, INK, SURFACE, readable, themeMap, toneOf } from '../lib/color'
+import { ACCENT, CANVAS, INK, SURFACE, readable, themeMap, toneOf } from '../lib/color'
 import { useMediaUrl, usePreview, youtubeId } from '../lib/media'
-import { htmlOf, linksIn, richExtensions, sanitize } from '../lib/rich'
+import { htmlOf, markdownPaste, richExtensions, sanitize, linksIn } from '../lib/rich'
 import { outerSize, shapePath } from '../lib/shapes'
 import { useTheme } from '../lib/store'
 import type { BoxData, BoxNode as BoxNodeT, MediaItem } from '../lib/types'
-import { patchNodes, stopEditing, useEd } from './store'
+import { patchNodes, reportHead, stopEditing, useEd } from './store'
 
 const SIDES = [
   { id: 't', pos: Position.Top }, { id: 'r', pos: Position.Right },
   { id: 'b', pos: Position.Bottom }, { id: 'l', pos: Position.Left },
 ]
 const MAX_W = 260
+/** 한 겹 더 감쌀 때마다 테두리를 이만큼 두껍게 (바깥일수록 두꺼움) */
+const LEVEL_W = 1.5
 
 export const BoxNode = memo(function BoxNode({ id, data, selected }: NodeProps<BoxNodeT>) {
   const theme = useTheme()
   const editing = useEd((s) => s.editingId === id)
+  const frame = useEd((s) => s.frames[id])
+  const dropping = useEd((s) => s.dropTarget === id)
   const content = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ w: 60, h: 20 })
 
   // 내용 크기를 재서 도형 크기를 정한다 (글이 늘면 상자도 커짐)
   useLayoutEffect(() => {
     const el = content.current!
-    const ro = new ResizeObserver(() => setSize({ w: el.offsetWidth, h: el.offsetHeight }))
+    const ro = new ResizeObserver(() => {
+      setSize({ w: el.offsetWidth, h: el.offsetHeight })
+      reportHead(id, el.offsetWidth, el.offsetHeight)
+    })
     ro.observe(el)
     return () => ro.disconnect()
-  }, [])
+  }, [id])
 
-  const { w, h } = outerSize(data.shape, size.w, size.h)
-  const fill = data.fill ? themeMap(data.fill, theme) : SURFACE[theme]
+  // 집합(안에 상자가 있음): 크기는 안쪽 상자들로 정해지고, 글은 위쪽 머리글로
+  const { w, h } = frame ?? outerSize(data.shape, size.w, size.h)
+  const fill = data.fill ? themeMap(data.fill, theme) : frame ? 'transparent' : SURFACE[theme]
   const stroke = data.stroke ? themeMap(data.stroke, theme) : INK[theme]
-  const tone = toneOf(fill)
+  const sw = data.strokeWidth + (frame ? frame.level * LEVEL_W : 0)
+  const tone = toneOf(fill === 'transparent' ? CANVAS[theme] : fill)
   const d = shapePath(data.shape, w, h)
   const empty = !data.title && !data.body && !data.media.length
 
   return (
-    <div className={`box tone-${tone}`} style={{ width: w, height: h, ['--ink' as string]: readable('#1C1C1E', fill) }}>
+    <div className={`box tone-${tone}${frame ? ' set' : ''}`} style={{ width: w, height: h, ['--ink' as string]: readable('#1C1C1E', fill === 'transparent' ? CANVAS[theme] : fill) }}>
       <svg className="box-shape" width={w} height={h}>
-        {selected && <path d={d} fill="none" stroke={ACCENT} strokeOpacity={0.35} strokeWidth={data.strokeWidth + 5} strokeLinejoin="round" />}
-        <path d={d} fill={fill} stroke={data.dash === 'none' ? 'none' : stroke} strokeWidth={data.strokeWidth}
+        {selected && <path d={d} fill="none" stroke={ACCENT} strokeOpacity={0.35} strokeWidth={sw + 5} strokeLinejoin="round" />}
+        <path d={d} fill={fill} stroke={data.dash === 'none' ? 'none' : stroke} strokeWidth={sw}
           strokeDasharray={data.dash === 'dashed' ? '6 4' : undefined} strokeLinejoin="round" />
+        {dropping && <path d={d} fill={ACCENT} fillOpacity={0.06} stroke={ACCENT} strokeWidth={2} strokeDasharray="5 4" strokeLinejoin="round" />}
       </svg>
       <div ref={content} className={`box-content${editing ? ' nodrag nopan editing' : ''}`}
-        style={data.wrap ? { width: data.wrap } : { maxWidth: MAX_W }}>
-        {editing ? <BoxEditor id={id} data={data} /> : empty ? <div className="box-empty" /> : <BoxView data={data} />}
+        style={{ ...(data.wrap ? { width: data.wrap } : { maxWidth: MAX_W }), ...(frame && { top: frame.top }) }}>
+        {editing ? <BoxEditor id={id} data={data} /> : empty ? (frame ? null : <div className="box-empty" />) : <BoxView data={data} />}
         <MediaList id={id} media={data.media} editing={editing} />
         {!data.hidePreview && <LinkCards html={data.body} />}
       </div>
-      {selected && <WidthHandle id={id} data={data} contentWidth={size.w} />}
+      {selected && !frame && <WidthHandle id={id} data={data} contentWidth={size.w} />}
       {SIDES.map((s) => <Handle key={s.id} id={s.id} type="source" position={s.pos} className="h" />)}
     </div>
   )
@@ -90,6 +100,7 @@ function BoxEditor({ id, data }: { id: string; data: BoxData }) {
     onUpdate: save('title'),
     onFocus,
     editorProps: {
+      handlePaste: markdownPaste,
       handleKeyDown: (v, e) => {
         if (e.isComposing || e.keyCode === 229) return false // 한글 조합 중 Enter는 IME에 맡김
         if (e.key === 'Enter' && !e.shiftKey) { focusSibling(v.dom, 1, 'start'); return true }
@@ -104,6 +115,7 @@ function BoxEditor({ id, data }: { id: string; data: BoxData }) {
     onUpdate: save('body'),
     onFocus,
     editorProps: {
+      handlePaste: markdownPaste,
       handleKeyDown: (v, e) => {
         if (e.isComposing || e.keyCode === 229) return false
         if (e.key === 'Escape') { stopEditing(); return true }

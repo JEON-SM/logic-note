@@ -5,8 +5,10 @@ import { setSettings, useSettings, useSync } from '../lib/store'
 import { BUILTIN_CLIENT_ID, connect, disconnect, sync } from '../lib/sync'
 import { exportAll, importAll } from '../lib/db'
 import { pickFiles } from '../lib/media'
+import { BASE_DEFAULTS } from '../lib/shapes'
+import { DefaultsForm } from './Defaults'
 import { Modal } from './Dialogs'
-import { cls, IB } from './kit'
+import { IB, Segmented } from './kit'
 import type { Bg } from '../lib/types'
 
 export const BGS: { id: Bg; label: string }[] = [
@@ -19,16 +21,6 @@ export const BGS: { id: Bg; label: string }[] = [
 
 export const useSettingsOpen = create<{ open: boolean }>(() => ({ open: false }))
 export const openSettings = () => useSettingsOpen.setState({ open: true })
-
-function Segmented<T extends string>({ value, options, onChange }: { value: T; options: { id: T; label: string }[]; onChange: (v: T) => void }) {
-  return (
-    <div className="seg">
-      {options.map((o) => (
-        <button key={o.id} type="button" className={cls(value === o.id && 'on')} onClick={() => onChange(o.id)}>{o.label}</button>
-      ))}
-    </div>
-  )
-}
 
 export function SettingsDialog() {
   const open = useSettingsOpen((s) => s.open)
@@ -59,6 +51,13 @@ export function SettingsDialog() {
         <div className="set-row"><span>링크 미리보기 <small>microlink.io 사용</small></span>
           <Segmented value={s.previews ? 'on' : 'off'} onChange={(v) => setSettings({ previews: v === 'on' })} options={[{ id: 'on', label: '켜기' }, { id: 'off', label: '끄기' }]} />
         </div>
+      </section>
+
+      <section className="set-sec">
+        <h3>새 상자·선 기본 모양</h3>
+        <p className="set-help">모든 노트에 적용돼요. 노트마다 다르게 하려면 편집기 ⋮ 메뉴 › 기본 모양에서 바꾸세요.</p>
+        <DefaultsForm value={s.defaults} onChange={(defaults) => setSettings({ defaults })} />
+        <div className="set-actions"><button className="btn" onClick={() => setSettings({ defaults: BASE_DEFAULTS })}>처음 값으로</button></div>
       </section>
 
       <section className="set-sec">

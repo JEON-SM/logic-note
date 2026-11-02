@@ -3,9 +3,11 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import {
   ChevronRight, Copy, Folder as FolderIcon, FolderInput, FolderPlus, Menu as MenuIcon, Moon, MoreVertical, NotebookText,
   Pencil, Plus, RotateCcw, Search, Settings, SortAsc, Star, Sun, Trash2, X,
-  Import,
+  Import, Layers, FolderOutput,
 } from 'lucide-react'
-import { createFolder, createNote, db, deleteFolder, duplicateNote, emptyTrash, noteText, purgeNote, restoreNote, updateFolder, updateNote } from '../lib/db'
+import {
+  createFolder, createNote, db, deleteFolder, duplicateNote, emptyTrash, freshNotes, noteText, purgeNote, restoreNote, ungroup, updateFolder, updateNote,
+} from '../lib/db'
 import { go, setSettings, useSettings, useTheme, type Route } from '../lib/store'
 import type { Folder, Note } from '../lib/types'
 import { cls, IB, Item, Logo, Menu, MenuSep } from '../ui/kit'
@@ -15,6 +17,7 @@ import { openImport } from '../ui/ImportDialog'
 import { NoteThumb } from './NoteThumb'
 
 const DRAG = 'application/x-ln-note'
+const DRAG_F = 'application/x-ln-folder'
 const fmtDate = (t: number) => {
   const d = new Date(t), now = new Date()
   return d.toDateString() === now.toDateString()
@@ -30,6 +33,11 @@ async function newFolder(parentId: string | null) {
   go('#/f/' + f.id)
 }
 
+async function newGroup() {
+  const name = await promptText('새 그룹 (폴더를 묶어요)', '', '만들기')
+  if (name) await createFolder(name, null, true)
+}
+
 function onDropNote(e: DragEvent, folderId: string | null) {
   const id = e.dataTransfer.getData(DRAG)
   if (!id) return
@@ -37,6 +45,16 @@ function onDropNote(e: DragEvent, folderId: string | null) {
   updateNote(id, { folderId, trashed: 0 })
 }
 const allowDrop = (e: DragEvent) => { if (e.dataTransfer.types.includes(DRAG)) e.preventDefault() }
+/** 사이드바에서 폴더를 끌어 그룹에 넣거나(빼거나) 다른 폴더 안으로 */
+const allowFolderDrop = (e: DragEvent) => { if (e.dataTransfer.types.includes(DRAG_F)) e.preventDefault() }
+function onDropFolder(e: DragEvent, parentId: string | null, folders: Folder[]) {
+  const id = e.dataTransfer.getData(DRAG_F)
+  if (!id || id === parentId) return
+  e.preventDefault()
+  e.stopPropagation()
+  for (let p = parentId; p; p = folders.find((x) => x.id === p)?.parentId ?? null) if (p === id) return
+  updateFolder(id, { parentId })
+}
 
 export function Library({ route }: { route: Route }) {
   const folders = useLiveQuery(() => db.folders.toArray(), [])?.filter((f) => !f.deleted) ?? []
@@ -66,7 +84,11 @@ export function Library({ route }: { route: Route }) {
   const subfolders = route.name === 'folder' && !q ? folders.filter((f) => f.parentId === route.id).sort((a, b) => a.name.localeCompare(b.name)) : []
 
   const title = route.name === 'trash' ? '휴지통' : route.name === 'fav' ? '즐겨찾기' : folder?.name ?? '모든 노트'
-  const add = async () => { const n = await createNote(route.name === 'folder' ? route.id : null); go('#/n/' + n.id) }
+  const add = async () => {
+    const n = await createNote(route.name === 'folder' && !folder?.group ? route.id : null)
+    freshNotes.add(n.id)
+    go('#/n/' + n.id)
+  }
 
   return (
     <div className="lib">
@@ -91,7 +113,7 @@ export function Library({ route }: { route: Route }) {
           )}
           <span className="grow" />
           {query === null && <IB label="검색" onClick={() => setQuery('')}><Search size={18} strokeWidth={1.6} /></IB>}
-          {route.name !== 'trash' && (
+          {route.name !== 'trash' && !folder?.group && (
             <IB label="AI 도식 가져오기" onClick={() => openImport({ kind: 'new', folderId: route.name === 'folder' ? route.id : null })}>
               <Import size={18} strokeWidth={1.6} />
             </IB>
@@ -124,7 +146,7 @@ export function Library({ route }: { route: Route }) {
             <p>{q ? '검색 결과가 없습니다' : route.name === 'trash' ? '휴지통이 비어 있습니다' : '노트가 없습니다'}</p>
           </div>
         )}
-        {route.name !== 'trash' && <button className="fab" title="새 노트" aria-label="새 노트" onClick={add}><Plus size={26} strokeWidth={1.8} /></button>}
+        {route.name !== 'trash' && !folder?.group && <button className="fab" title="새 노트" aria-label="새 노트" onClick={add}><Plus size={26} strokeWidth={1.8} /></button>}
       </main>
     </div>
   )
@@ -150,7 +172,7 @@ function NoteCard({ note, theme, trash, folderName }: { note: Note; theme: 'ligh
         </>) : (<>
           <Item icon={<Star size={15} />} onSelect={() => updateNote(note.id, { favorite: note.favorite ? 0 : 1 })}>{note.favorite ? '즐겨찾기 해제' : '즐겨찾기'}</Item>
           <Item icon={<Pencil size={15} />} onSelect={async () => { const t = await promptText('이름 변경', note.title); if (t) updateNote(note.id, { title: t }) }}>이름 변경</Item>
-          <Item icon={<FolderInput size={15} />} onSelect={async () => { const f = await pickFolder('이동할 폴더'); if (f !== undefined) updateNote(note.id, { folderId: f }) }}>이동</Item>
+          <Item icon={<FolderInput size={15} />} onSelect={async () => { const f = await pickFolder('이동할 폴더', undefined, true); if (f !== undefined) updateNote(note.id, { folderId: f }) }}>이동</Item>
           <Item icon={<Copy size={15} />} onSelect={() => duplicateNote(note.id)}>복제</Item>
           <MenuSep />
           <Item icon={<Trash2 size={15} />} danger onSelect={() => updateNote(note.id, { trashed: 1 })}>삭제</Item>
@@ -180,9 +202,18 @@ function Sidebar({ route, folders, notes, open, onClose, trashCount }: {
           {nav('fav', '#/fav', <Star size={18} strokeWidth={1.6} />, '즐겨찾기', notes.filter((n) => n.favorite).length)}
           {nav('trash', '#/trash', <Trash2 size={18} strokeWidth={1.6} />, '휴지통', trashCount)}
         </nav>
-        <div className="side-head"><span>폴더</span><IB label="새 폴더" onClick={() => newFolder(null)}><FolderPlus size={16} strokeWidth={1.6} /></IB></div>
+        <div className="side-head" onDragOver={allowFolderDrop} onDrop={(e) => onDropFolder(e, null, folders)}>
+          <span>폴더</span>
+          <Menu align="end" trigger={<IB label="새 폴더·그룹"><FolderPlus size={16} strokeWidth={1.6} /></IB>}>
+            <Item icon={<FolderPlus size={15} />} onSelect={() => newFolder(null)}>새 폴더</Item>
+            <Item icon={<Layers size={15} />} onSelect={newGroup}>새 그룹 (폴더 묶음)</Item>
+          </Menu>
+        </div>
         <div className="tree">
           <FolderTree parent={null} depth={0} folders={folders} notes={notes} route={route} onPick={onClose} />
+          {folders.filter((f) => f.group).sort((a, b) => a.name.localeCompare(b.name)).map((g) => (
+            <GroupSection key={g.id} group={g} folders={folders} notes={notes} route={route} onPick={onClose} />
+          ))}
           {!folders.length && <p className="tree-empty">폴더가 없습니다</p>}
         </div>
         <div className="side-foot">
@@ -196,11 +227,41 @@ function Sidebar({ route, folders, notes, open, onClose, trashCount }: {
   )
 }
 
+/** 폴더 그룹: 사이드바의 접을 수 있는 묶음 (안에는 폴더만) */
+function GroupSection({ group: g, folders, notes, route, onPick }: { group: Folder; folders: Folder[]; notes: Note[]; route: Route; onPick: () => void }) {
+  const expanded = useSettings((s) => s.expanded)
+  const [over, setOver] = useState(false)
+  const key = 'closed:' + g.id // 그룹은 기본으로 펼쳐 둔다
+  const closed = expanded.includes(key)
+  const count = folders.filter((f) => f.parentId === g.id).length
+  return (
+    <div>
+      <div className={cls('group-head', over && 'drop-on')}
+        onDragOver={(e) => { allowFolderDrop(e); setOver(e.dataTransfer.types.includes(DRAG_F)) }} onDragLeave={() => setOver(false)}
+        onDrop={(e) => { setOver(false); onDropFolder(e, g.id, folders) }}>
+        <button className={cls('chev', !closed && 'open')} aria-label="펼치기"
+          onClick={() => setSettings({ expanded: closed ? expanded.filter((x) => x !== key) : [...expanded, key] })}><ChevronRight size={14} /></button>
+        <Layers size={14} strokeWidth={1.8} />
+        <span onClick={() => setSettings({ expanded: closed ? expanded.filter((x) => x !== key) : [...expanded, key] })}>{g.name}</span>
+        <span className="count">{count || ''}</span>
+        <Menu align="end" trigger={<IB label="그룹 메뉴" className="row-more"><MoreVertical size={14} /></IB>}>
+          <Item icon={<FolderPlus size={15} />} onSelect={() => newFolder(g.id)}>그룹에 새 폴더</Item>
+          <Item icon={<Pencil size={15} />} onSelect={async () => { const n = await promptText('그룹 이름', g.name); if (n) updateFolder(g.id, { name: n }) }}>이름 변경</Item>
+          <MenuSep />
+          <Item icon={<FolderOutput size={15} />} onSelect={() => ungroup(g.id)}>그룹 해제 (폴더는 그대로)</Item>
+        </Menu>
+      </div>
+      {!closed && <FolderTree parent={g.id} depth={0} folders={folders} notes={notes} route={route} onPick={onPick} />}
+      {!closed && !count && <p className="tree-empty">폴더를 여기로 끌어다 놓으세요</p>}
+    </div>
+  )
+}
+
 function FolderTree({ parent, depth, folders, notes, route, onPick }: {
   parent: string | null; depth: number; folders: Folder[]; notes: Note[]; route: Route; onPick: () => void
 }) {
   const expanded = useSettings((s) => s.expanded)
-  const kids = folders.filter((f) => f.parentId === parent).sort((a, b) => a.name.localeCompare(b.name))
+  const kids = folders.filter((f) => f.parentId === parent && !f.group).sort((a, b) => a.name.localeCompare(b.name))
   const toggle = (id: string) => setSettings({ expanded: expanded.includes(id) ? expanded.filter((x) => x !== id) : [...expanded, id] })
   return (
     <>
@@ -210,7 +271,9 @@ function FolderTree({ parent, depth, folders, notes, route, onPick }: {
         return (
           <div key={f.id}>
             <div className={cls('tree-row', route.name === 'folder' && route.id === f.id && 'on')} style={{ paddingLeft: 8 + depth * 14 }}
-              onDragOver={allowDrop} onDrop={(e) => onDropNote(e, f.id)}>
+              draggable onDragStart={(e) => e.dataTransfer.setData(DRAG_F, f.id)}
+              onDragOver={(e) => { allowDrop(e); allowFolderDrop(e) }}
+              onDrop={(e) => { if (e.dataTransfer.types.includes(DRAG_F)) onDropFolder(e, f.id, folders); else onDropNote(e, f.id) }}>
               <button className={cls('chev', isOpen && 'open', !hasKids && 'hide')} onClick={() => toggle(f.id)} aria-label="펼치기"><ChevronRight size={14} /></button>
               <a href={'#/f/' + f.id} onClick={onPick}><FolderIcon size={16} strokeWidth={1.6} /><span>{f.name}</span></a>
               <span className="count">{notes.filter((n) => n.folderId === f.id).length || ''}</span>
