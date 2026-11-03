@@ -1,13 +1,15 @@
+import { useMemo } from 'react'
 import { create } from 'zustand'
 import { applyEdgeChanges, applyNodeChanges, type EdgeChange, type NodeChange, type XYPosition } from '@xyflow/react'
 import type { Editor } from '@tiptap/core'
 import { animate } from 'motion/react'
 import { uid, updateNote } from '../lib/db'
-import { PAGE_GAP, fitToPaper, newPaper, nodesByPage, pageAt, pageSize, pageStep, paperKind, shift, type PaperKind } from '../lib/pages'
+import { fitToPaper, newPaper, nodesByPage, pageAt, pageOrigin, pageSize, pagesSize, paperKind, relocate, type PaperKind } from '../lib/pages'
 import { applyToHtml, type Fmt } from '../lib/rich'
 import { boxAt, hierarchy, layoutSets, rectOf, type Frame, type Rect } from '../lib/sets'
 import { MEMO, defaultBox, defaultEdge, isMemo } from '../lib/shapes'
-import { useSettings } from '../lib/store'
+import { groundLook } from '../lib/color'
+import { useSettings, useTheme } from '../lib/store'
 import type { Bg, BoxData, BoxNode, Defaults, EdgeData, LogicEdge, Note, Paper, Shape } from '../lib/types'
 
 type Snap = { nodes: BoxNode[]; edges: LogicEdge[]; paper: Paper | null }
@@ -17,6 +19,8 @@ interface S {
   noteId: string
   title: string
   bg: Bg
+  /** 바탕색 (null이면 테마 기본) */
+  ground: string | null
   /** A4 용지 노트면 페이지 구성, 무한 캔버스면 null */
   paper: Paper | null
   /** 이 노트만의 기본 모양 (null이면 전체 설정) */
@@ -43,7 +47,7 @@ interface S {
 }
 
 export const useEd = create<S>(() => ({
-  noteId: '', title: '', bg: 'grid', paper: null, defaults: null, nodes: [], edges: [], frames: {}, dropTarget: null, picking: null, resizing: null,
+  noteId: '', title: '', bg: 'grid', ground: null, paper: null, defaults: null, nodes: [], edges: [], frames: {}, dropTarget: null, picking: null, resizing: null,
   editingId: null, editingEdge: null, active: null,
   tool: 'hand', shape: 'rect', edgeStyle: defaultEdge(), past: [], future: [], rev: 0,
 }))
@@ -53,6 +57,12 @@ const set = useEd.setState
 const clean = <T extends { selected?: boolean; dragging?: boolean }>(a: T[]) => a.map(({ selected, dragging, ...r }) => r as T)
 const snap = (): Snap => ({ nodes: clean(get().nodes), edges: clean(get().edges), paper: get().paper })
 const bump = () => get().rev + 1
+
+/** 이 노트 바탕과, 그 위 내용을 그릴 밝기(theme) */
+export function useLook() {
+  const theme = useTheme(), ground = useEd((s) => s.ground)
+  return useMemo(() => groundLook(ground, theme), [ground, theme])
+}
 
 // ── 기본 모양 ──
 /** 지금 노트에서 쓰는 기본값: 노트별 설정이 있으면 그것, 없으면 전체 설정 */
@@ -72,7 +82,7 @@ let loading = false
 export function loadNote(n: Note) {
   loading = true
   set({
-    noteId: n.id, title: n.title, bg: n.bg ?? 'grid', paper: n.paper ?? null, defaults: n.defaults ?? null, nodes: n.nodes, edges: n.edges, frames: {},
+    noteId: n.id, title: n.title, bg: n.bg ?? 'grid', ground: n.ground ?? null, paper: n.paper ?? null, defaults: n.defaults ?? null, nodes: n.nodes, edges: n.edges, frames: {},
     editingId: null, editingEdge: null, dropTarget: null, picking: null, resizing: null, past: [], future: [], rev: 0, tool: 'hand',
   })
   applyDefaults()
@@ -85,11 +95,11 @@ export function flushSave() {
   if (!timer) return
   clearTimeout(timer)
   timer = undefined
-  const { noteId, title, bg, defaults } = get()
-  if (noteId) updateNote(noteId, { title, bg, defaults, ...snap() })
+  const { noteId, title, bg, ground, defaults } = get()
+  if (noteId) updateNote(noteId, { title, bg, ground, defaults, ...snap() })
 }
 useEd.subscribe((s, p) => {
-  if (!loading && s.noteId && s.noteId === p.noteId && (s.rev !== p.rev || s.title !== p.title || s.bg !== p.bg || s.defaults !== p.defaults || s.paper !== p.paper)) {
+  if (!loading && s.noteId && s.noteId === p.noteId && (s.rev !== p.rev || s.title !== p.title || s.bg !== p.bg || s.ground !== p.ground || s.defaults !== p.defaults || s.paper !== p.paper)) {
     clearTimeout(timer)
     timer = setTimeout(flushSave, 600)
   }
@@ -178,9 +188,13 @@ export function onEdgesChange(ch: EdgeChange<LogicEdge>[]) {
 export const selectedNodes = () => get().nodes.filter((n) => n.selected)
 export const selectedEdges = () => get().edges.filter((e) => e.selected)
 
+/** 방금 만든 상자 (BoxNode가 나타나는 움직임을 한 번 보여 주고 지운다) */
+export const born = new Set<string>()
+
 export function addBox(position: XYPosition, shape: Shape, patch: Partial<BoxData> = {}) {
   commit()
   const id = uid()
+  born.add(id)
   const d = effDefaults()
   const memo = isMemo(shape) && { fill: MEMO.fill, stroke: null, dash: 'none' as const, w: MEMO.w, h: MEMO.h }
   const node: BoxNode = {
@@ -255,12 +269,12 @@ export function finishDrag(ids: string[]) {
   // 용지 노트: 종이 밖에 놓으면 가장 가까운 종이 안으로 돌아온다
   const paper = get().paper
   if (!paper) return
-  const { w } = pageSize(paper), bottom = paper.pages.length * pageStep(paper) - PAGE_GAP
+  const all = pagesSize(paper)
   const back = new Map<string, XYPosition>()
   for (const id of tops) {
     const c = get().nodes.find((n) => n.id === id)?.position
     if (!c) continue
-    const x = Math.min(w - 20, Math.max(20, c.x)), y = Math.min(bottom - 20, Math.max(20, c.y))
+    const x = Math.min(all.w - 20, Math.max(20, c.x)), y = Math.min(all.h - 20, Math.max(20, c.y))
     if (x !== c.x || y !== c.y) back.set(id, { x: x - c.x, y: y - c.y })
   }
   if (back.size) glide(back, () => {})
@@ -405,6 +419,7 @@ export function pasteClip(offset = 32) {
     data: { ...n.data, parent: n.data.parent ? map.get(n.data.parent) ?? n.data.parent : null },
   }))
   const edges = clip.edges.map((e) => ({ ...e, id: uid(), source: map.get(e.source)!, target: map.get(e.target)! }))
+  nodes.forEach((n) => born.add(n.id))
   clip = { nodes: clean(nodes), edges }
   set((s) => ({ nodes: [...s.nodes.map((n) => ({ ...n, selected: false })), ...nodes], edges: [...s.edges, ...edges], rev: s.rev + 1 }))
 }
@@ -414,67 +429,64 @@ export function pasteClip(offset = 32) {
 export function clampToPaper(p: XYPosition): XYPosition {
   const paper = get().paper
   if (!paper) return p
-  const { w, h } = pageSize(paper), top = pageAt(paper, p.y) * pageStep(paper)
-  return { x: Math.min(w - 20, Math.max(20, p.x)), y: Math.min(top + h - 20, Math.max(top + 20, p.y)) }
+  const { w, h } = pageSize(paper), o = pageOrigin(paper, pageAt(paper, p))
+  return { x: Math.min(o.x + w - 20, Math.max(o.x + 20, p.x)), y: Math.min(o.y + h - 20, Math.max(o.y + 20, p.y)) }
 }
 
 export { paperKind, type PaperKind }
+
+/** 페이지 구성을 바꾸며 상자를 따라 옮긴다 (to: 예전 i번째 페이지가 갈 자리, null이면 지움) */
+function rearrange(next: Paper, to: (i: number) => number | null, record = true) {
+  const s = get(), old = s.paper!
+  if (record) commit()
+  const nodes = relocate(old, next, s.nodes, to), ids = new Set(nodes.map((n) => n.id))
+  set((st) => ({ paper: next, nodes, edges: st.edges.filter((e) => ids.has(e.source) && ids.has(e.target)), rev: st.rev + 1 }))
+}
 
 /** 무한 캔버스 ↔ A4 (세로·가로). 내용이 용지보다 넓으면 true */
 export function setPaper(kind: PaperKind): boolean {
   const s = get()
   if (kind === paperKind(s.paper)) return false
-  commit()
-  if (kind === 'canvas') { set((st) => ({ paper: null, rev: st.rev + 1 })); return false }
+  if (kind === 'canvas') { commit(); set((st) => ({ paper: null, rev: st.rev + 1 })); return false }
   if (!s.paper) {
+    commit()
     const r = fitToPaper(newPaper(kind === 'a4-land'), s.nodes, s.frames)
     set((st) => ({ paper: r.paper, nodes: r.nodes, rev: st.rev + 1 }))
     return r.overflow
   }
   // 방향만 바꿀 때: 각 페이지의 내용은 그 페이지에 그대로
-  const old = s.paper, next: Paper = { ...old, landscape: kind === 'a4-land' || undefined }
-  const dy = new Map<string, number>()
-  nodesByPage(old, s.nodes).forEach((ids, i) => ids.forEach((id) => dy.set(id, i * (pageStep(next) - pageStep(old)))))
-  set((st) => ({ paper: next, nodes: shift(st.nodes, dy), rev: st.rev + 1 }))
+  rearrange({ ...s.paper, landscape: kind === 'a4-land' || undefined }, (i) => i)
   return false
+}
+
+/** 다음 페이지를 아래에(false) 또는 옆에(true) */
+export function setPageSide(side: boolean) {
+  const p = get().paper
+  if (p && !!p.side !== side) rearrange({ ...p, side: side || undefined }, (i) => i)
 }
 
 /** 페이지 순서를 바꾼다 (order: 새 순서의 페이지 id) */
 export function reorderPages(order: string[]) {
-  const s = get(), p = s.paper
+  const p = get().paper
   if (!p || order.join() === p.pages.join()) return
-  commit()
-  const dy = new Map<string, number>()
-  nodesByPage(p, s.nodes).forEach((ids, i) => ids.forEach((id) => dy.set(id, (order.indexOf(p.pages[i]) - i) * pageStep(p))))
-  set((st) => ({ paper: { ...p, pages: order }, nodes: shift(st.nodes, dy), rev: st.rev + 1 }))
+  rearrange({ ...p, pages: order }, (i) => order.indexOf(p.pages[i]))
 }
 
-/** at 위치에 빈 페이지를 끼운다 (뒤 페이지 내용은 한 칸씩 아래로) */
+/** at 위치에 빈 페이지를 끼운다 (뒤 페이지 내용은 한 칸씩 밀림) */
 export function addPage(at?: number, record = true) {
-  const s = get(), p = s.paper
+  const p = get().paper
   if (!p) return
-  if (record) commit()
   const i = at ?? p.pages.length
-  const dy = new Map<string, number>()
-  nodesByPage(p, s.nodes).forEach((ids, k) => k >= i && ids.forEach((id) => dy.set(id, pageStep(p))))
   const pages = [...p.pages]
   pages.splice(i, 0, newPaper().pages[0])
-  set((st) => ({ paper: { ...p, pages }, nodes: shift(st.nodes, dy), rev: st.rev + 1 }))
+  rearrange({ ...p, pages }, (k) => (k >= i ? k + 1 : k), record)
 }
 
 /** 페이지와 그 위의 상자를 지운다 (마지막 한 장은 남긴다) */
 export function removePage(i: number) {
-  const s = get(), p = s.paper
+  const p = get().paper
   if (!p || p.pages.length < 2) return
-  commit()
-  const by = nodesByPage(p, s.nodes), gone = new Set(by[i]), dy = new Map<string, number>()
-  by.forEach((ids, k) => k > i && ids.forEach((id) => dy.set(id, -pageStep(p))))
-  set((st) => ({
-    paper: { ...p, pages: p.pages.filter((_, k) => k !== i) },
-    nodes: shift(st.nodes.filter((n) => !gone.has(n.id)), dy),
-    edges: st.edges.filter((e) => !gone.has(e.source) && !gone.has(e.target)),
-    rev: st.rev + 1,
-  }))
+  rearrange({ ...p, pages: p.pages.filter((_, k) => k !== i) }, (k) => (k === i ? null : k > i ? k - 1 : k))
 }
 
 /** 페이지를 내용째 복제해 바로 뒤에 넣는다 */
@@ -485,8 +497,9 @@ export function duplicatePage(i: number) {
   const ids = new Set(nodesByPage(p, s.nodes)[i])
   addPage(i + 1, false)
   const map = new Map([...ids].map((id) => [id, uid()]))
+  const a = pageOrigin(p, i), b = pageOrigin(p, i + 1)
   const nodes = clean(s.nodes.filter((n) => ids.has(n.id))).map((n) => ({
-    ...n, id: map.get(n.id)!, position: { x: n.position.x, y: n.position.y + pageStep(p) },
+    ...n, id: map.get(n.id)!, position: { x: n.position.x + b.x - a.x, y: n.position.y + b.y - a.y },
     data: { ...n.data, parent: n.data.parent ? map.get(n.data.parent) ?? n.data.parent : null },
   }))
   const edges = clean(s.edges.filter((e) => ids.has(e.source) && ids.has(e.target))).map((e) => ({ ...e, id: uid(), source: map.get(e.source)!, target: map.get(e.target)! }))

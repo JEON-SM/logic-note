@@ -1,3 +1,5 @@
+import { t } from './i18n'
+
 export type Theme = 'light' | 'dark'
 type RGB = [number, number, number]
 
@@ -44,10 +46,10 @@ export const invert = (hex: string) => rgbToHex(hexToRgb(hex).map((v) => 255 - v
 export function colorName(hex: string) {
   const [r, g, b] = hexToRgb(hex).map((v) => v / 255)
   const max = Math.max(r, g, b), min = Math.min(r, g, b), c = max - min, l = (max + min) / 2
-  const tone = l > 0.8 ? '연한 ' : l < 0.3 ? '진한 ' : ''
-  if (isAchromatic(hex)) return l < 0.12 ? '검정' : l > 0.97 ? '흰색' : tone + '회색'
+  const tone = l > 0.8 ? t('연한 ') : l < 0.3 ? t('진한 ') : ''
+  if (isAchromatic(hex)) return l < 0.12 ? t('검정') : l > 0.97 ? t('흰색') : tone + t('회색')
   const h = ((max === r ? (g - b) / c : max === g ? (b - r) / c + 2 : (r - g) / c + 4) * 60 + 360) % 360
-  const name = h < 15 || h >= 335 ? '빨강' : h < 40 ? '주황' : h < 65 ? '노랑' : h < 160 ? '초록' : h < 190 ? '청록' : h < 250 ? '파랑' : h < 290 ? '보라' : '분홍'
+  const name = h < 15 || h >= 335 ? t('빨강') : h < 40 ? t('주황') : h < 65 ? t('노랑') : h < 160 ? t('초록') : h < 190 ? t('청록') : h < 250 ? t('파랑') : h < 290 ? t('보라') : t('분홍')
   return tone + name
 }
 
@@ -56,6 +58,30 @@ export const themeMap = (c: string, theme: Theme) => (theme === 'dark' && isAchr
 
 /** 배경이 밝은지 어두운지 (검정/흰 글씨 대비가 같아지는 지점 기준) */
 export const toneOf = (bg: string): Theme => (luminance(bg) > 0.179 ? 'light' : 'dark')
+
+/** a에서 b로 t만큼 섞은 색 */
+export const mix = (a: string, b: string, t: number) => { const x = hexToRgb(a), y = hexToRgb(b); return rgbToHex(x.map((v, i) => v + (y[i] - v) * t)) }
+
+/** 노트 바탕색 고르기용: 종이 같은 옅은 색과 칠판 같은 짙은 색 */
+export const GROUNDS = [
+  '#FFFFFF', '#F7F6F2', '#FBF5E6', '#FFF4C2', '#E9F5EC', '#E7F0FB', '#F2ECF9',
+  '#FCEBEB', '#F2F2F7', '#D9D9DE', '#2C2C2E', '#1E3A2F', '#1A2740', '#000000',
+]
+export type Look = { ground: string; theme: Theme; grid: string; custom: boolean }
+/**
+ * 노트 바탕: 정한 색(무채색은 다크 모드에서 반전) 또는 테마 기본색.
+ * 그 위의 상자·선은 바탕이 밝은지 어두운지에 맞춰 그린다(theme).
+ */
+export function groundLook(ground: string | null | undefined, theme: Theme): Look {
+  if (!ground) return { ground: CANVAS[theme], theme, grid: theme === 'dark' ? '#323236' : '#ECECEA', custom: false }
+  const g = themeMap(ground, theme), tone = toneOf(g)
+  return { ground: g, theme: tone, grid: mix(g, tone === 'dark' ? '#FFFFFF' : '#000000', tone === 'dark' ? 0.12 : 0.075), custom: true }
+}
+/** 캔버스 안(상자·선·종이)에서만 바꿔 쓸 CSS 변수 */
+export const groundVars = (l: Look) => (l.custom ? {
+  '--canvas': l.ground, '--grid': l.grid,
+  ...(l.theme === 'dark' ? { '--text-2': '#A1A1A6', '--text-3': '#6E6E73', '--line-2': '#3A3A3D' } : { '--text-2': '#6E6E73', '--text-3': '#A1A1A6', '--line-2': '#D8D8D4' }),
+} as Record<string, string> : undefined)
 
 /** 무채색 글씨가 배경 위에서 잘 안 보이면 반전한 색을 쓴다 */
 export const readable = (c: string, bg: string) => {

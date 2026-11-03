@@ -5,6 +5,7 @@ import { DefaultsForm } from '../ui/Defaults'
 import { Modal } from '../ui/Dialogs'
 import { Segmented } from '../ui/kit'
 import { setNoteDefaults, useEd } from './store'
+import { t } from '../lib/i18n'
 
 const useOpen = create<{ open: boolean }>(() => ({ open: false }))
 export const openDefaults = () => useOpen.setState({ open: true })
@@ -18,16 +19,16 @@ export function DefaultsDialog() {
   useEffect(() => () => useOpen.setState({ open: false }), [])
   if (!open) return null
   return (
-    <Modal open onClose={() => useOpen.setState({ open: false })} title="기본 모양" wide>
+    <Modal open onClose={() => useOpen.setState({ open: false })} title={t('기본 모양')} wide>
       <div className="exp-seg">
-        <Segmented value={scope} onChange={setScope} options={[{ id: 'note', label: '이 노트' }, { id: 'all', label: '모든 노트' }]} />
+        <Segmented value={scope} onChange={setScope} options={[{ id: 'note', label: t('이 노트') }, { id: 'all', label: t('모든 노트') }]} />
       </div>
-      <p className="set-help">새로 만드는 상자와 선에 쓰여요. 이미 있는 것은 그대로예요.</p>
+      <p className="set-help">{t('새로 만드는 상자와 선에 쓰여요. 이미 있는 것은 그대로예요.')}</p>
       {scope === 'note' ? (
         <>
           <label className="def-follow">
             <input type="checkbox" checked={!note} onChange={(e) => setNoteDefaults(e.target.checked ? null : all)} />
-            모든 노트 설정 따르기 {note && <small className="set-help">(이 노트만 따로 쓰는 중)</small>}
+            {t('모든 노트 설정 따르기')} {note && <small className="set-help">{t('(이 노트만 따로 쓰는 중)')}</small>}
           </label>
           {/* 따르는 중에 바꾸면 이 노트만의 설정이 된다 */}
           <DefaultsForm value={note ?? all} onChange={setNoteDefaults} />

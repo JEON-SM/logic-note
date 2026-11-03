@@ -3,6 +3,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { Theme } from './color'
 import { BASE_DEFAULTS } from './shapes'
+import type { LangSetting } from './i18n'
 import type { PaperKind } from './pages'
 import type { Bg, Defaults } from './types'
 
@@ -18,11 +19,15 @@ export interface Settings {
   defaults: Defaults
   /** 새 노트 용지 */
   paper: PaperKind
+  /** 새 노트 바탕색 (null이면 테마 기본) */
+  ground: string | null
+  /** 화면 언어 (auto: 기기 언어) */
+  lang: LangSetting
 }
 
 export const useSettings = create<Settings>()(
   persist((): Settings => ({
-    theme: 'system', bg: 'grid', recent: [], clientId: '', sort: 'updated', previews: true, expanded: [], defaults: BASE_DEFAULTS, paper: 'canvas',
+    theme: 'system', bg: 'grid', recent: [], clientId: '', sort: 'updated', previews: true, expanded: [], defaults: BASE_DEFAULTS, paper: 'canvas', ground: null, lang: 'auto',
   }), { name: 'ln.settings' }),
 )
 export const setSettings = (p: Partial<Settings>) => useSettings.setState(p)

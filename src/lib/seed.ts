@@ -1,5 +1,6 @@
 import { highlightAttrs } from './color'
 import { db } from './db'
+import { t } from './i18n'
 import { defaultBox, defaultEdge } from './shapes'
 import type { BoxData, BoxNode, EdgeData, LogicEdge } from './types'
 
@@ -12,31 +13,31 @@ const link = (source: string, sh: string, target: string, th: string, d: Partial
   id: `${source}-${target}`, type: 'logic', source, sourceHandle: sh, target, targetHandle: th, data: { ...defaultEdge(), ...d },
 })
 
-/** 처음 실행할 때 둘러보기 노트를 만든다 */
+/** 처음 실행할 때 둘러보기 노트를 만든다 (화면 언어로) */
 export async function seedIfEmpty() {
   if (localStorage.getItem('ln.seeded') || (await db.notes.count())) return
   localStorage.setItem('ln.seeded', '1')
-  const t = Date.now()
-  await db.folders.add({ id: 'start', name: '시작하기', parentId: null, createdAt: t, updatedAt: t })
+  const now = Date.now(), p = (s: string) => `<p>${t(s)}</p>`
+  await db.folders.add({ id: 'start', name: t('시작하기'), parentId: null, createdAt: now, updatedAt: now })
   await db.notes.add({
-    id: 'welcome', folderId: 'start', title: 'Logic Note 둘러보기', createdAt: t, updatedAt: t, bg: 'grid',
+    id: 'welcome', folderId: 'start', title: t('Logic Note 둘러보기'), createdAt: now, updatedAt: now, bg: 'grid',
     nodes: [
-      box('a', -170, -170, { title: '<p>대전제</p>', body: '<p>모든 사람은 죽는다</p>' }),
-      box('b', 170, -170, { title: '<p>소전제</p>', body: '<p>소크라테스는 사람이다</p>' }),
-      box('c', 0, 0, { shape: 'diamond', title: '<p>타당한가?</p>' }),
-      box('d', 0, 175, { shape: 'rect', title: '<p>결론</p>', body: `<p>소크라테스는 ${hl('죽는다', '#FFF176')}</p>`, fill: '#DDF3E4', stroke: '#30A46C' }),
-      box('e', 290, 0, { shape: 'ellipse', title: '<p>다시 검토</p>', dash: 'dashed' }),
+      box('a', -170, -170, { title: p('대전제'), body: p('모든 사람은 죽는다') }),
+      box('b', 170, -170, { title: p('소전제'), body: p('소크라테스는 사람이다') }),
+      box('c', 0, 0, { shape: 'diamond', title: p('타당한가?') }),
+      box('d', 0, 175, { shape: 'rect', title: p('결론'), body: `<p>${t('소크라테스는')} ${hl(t('죽는다'), '#FFF176')}</p>`, fill: '#DDF3E4', stroke: '#30A46C' }),
+      box('e', 290, 0, { shape: 'ellipse', title: p('다시 검토'), dash: 'dashed' }),
       box('tip', -400, 20, {
         shape: 'memo', fill: '#FFF4C2', dash: 'none', w: 220, h: 176,
-        title: '<p>사용법</p>',
-        body: '<ul><li><p>빈 곳 두 번 눌러 상자</p></li><li><p>상자 두 번 눌러 편집</p></li><li><p>가장자리 점을 끌어 연결</p></li><li><p>Tab: 이어지는 상자</p></li></ul>',
+        title: p('사용법'),
+        body: `<ul>${['빈 곳 두 번 눌러 상자', '상자 두 번 눌러 편집', '가장자리 점을 끌어 연결', 'Tab: 이어지는 상자'].map((s) => `<li>${p(s)}</li>`).join('')}</ul>`,
       }),
     ],
     edges: [
       link('a', 'b', 'c', 't'),
       link('b', 'b', 'c', 't'),
-      link('c', 'b', 'd', 't', { label: '예' }),
-      link('c', 'r', 'e', 'l', { label: '아니오', dashed: true }),
+      link('c', 'b', 'd', 't', { label: t('예') }),
+      link('c', 'r', 'e', 'l', { label: t('아니오'), dashed: true }),
     ],
   })
 }

@@ -3,13 +3,13 @@ import { Handle, NodeResizer, Position, type NodeProps } from '@xyflow/react'
 import { EditorContent, useEditor } from '@tiptap/react'
 import { animate } from 'motion/react'
 import { Play, X } from 'lucide-react'
-import { ACCENT, CANVAS, INK, SURFACE, readable, themeMap, toneOf } from '../lib/color'
+import { ACCENT, INK, SURFACE, readable, themeMap, toneOf } from '../lib/color'
 import { useMediaUrl, usePreview, youtubeId } from '../lib/media'
 import { htmlOf, markdownPaste, richExtensions, sanitize, linksIn } from '../lib/rich'
 import { MEMO, innerSize, isMemo, outerSize, shapePath } from '../lib/shapes'
-import { useTheme } from '../lib/store'
 import type { BoxData, BoxNode as BoxNodeT, MediaItem } from '../lib/types'
-import { commit, patchNodes, reportHead, stopEditing, useEd } from './store'
+import { born, commit, patchNodes, reportHead, stopEditing, useEd, useLook } from './store'
+import { t } from '../lib/i18n'
 
 const SIDES = [
   { id: 't', pos: Position.Top }, { id: 'r', pos: Position.Right },
@@ -22,7 +22,7 @@ const near = (a: number, b: number) => Math.abs(a - b) < 0.5
 type Shown = { x: number; y: number; w: number; h: number; top: number; set: boolean }
 
 export const BoxNode = memo(function BoxNode({ id, data, selected }: NodeProps<BoxNodeT>) {
-  const theme = useTheme()
+  const { theme, ground } = useLook()
   const editing = useEd((s) => s.editingId === id)
   const frame = useEd((s) => s.frames[id])
   const dropping = useEd((s) => s.dropTarget === id)
@@ -56,12 +56,17 @@ export const BoxNode = memo(function BoxNode({ id, data, selected }: NodeProps<B
   const fill = data.fill ? themeMap(data.fill, theme) : frame ? 'transparent' : SURFACE[theme]
   const stroke = data.stroke ? themeMap(data.stroke, theme) : INK[theme]
   const sw = data.strokeWidth + (frame ? frame.level * LEVEL_W : 0)
-  const tone = toneOf(fill === 'transparent' ? CANVAS[theme] : fill)
+  const tone = toneOf(fill === 'transparent' ? ground : fill)
   const d = shapePath(data.shape, w, h)
   const empty = !data.title && !data.body && !data.media.length
   const fold = Math.min(MEMO.fold, w / 3, h / 3)
 
   useFrameMotion(id, box, center, { w, h, top: frame?.top ?? 0, set: !!frame }, data.shape)
+  // 새로 만든 상자는 톡 하고 나타난다
+  useEffect(() => {
+    if (!born.delete(id) || !box.current || reduced()) return
+    animate(box.current, { scale: [0.8, 1], opacity: [0, 1] }, { duration: 0.26, ease: [0.22, 1, 0.36, 1] })
+  }, [id])
   // 집합에 들어가거나 나오면 살짝 튀어 자리 잡는다
   const parent = useRef(data.parent ?? null)
   useEffect(() => {
@@ -72,7 +77,7 @@ export const BoxNode = memo(function BoxNode({ id, data, selected }: NodeProps<B
 
   return (
     <div ref={box} className={`box tone-${tone}${frame ? ' set' : ''}${memoKind ? ' memo' : ''}`}
-      style={{ width: w, height: h, ['--ink' as string]: readable('#1C1C1E', fill === 'transparent' ? CANVAS[theme] : fill) }}
+      style={{ width: w, height: h, ['--ink' as string]: readable('#1C1C1E', fill === 'transparent' ? ground : fill) }}
       onDoubleClick={(e) => {
         // 크기 손잡이를 두 번 누르면 자동 크기로
         if (!(e.target as Element).closest('.react-flow__resize-control')) return
@@ -80,7 +85,7 @@ export const BoxNode = memo(function BoxNode({ id, data, selected }: NodeProps<B
         patchNodes([id], { w: null, h: null, wrap: null })
       }}>
       <svg className="box-shape" width={w} height={h}>
-        {selected && <path data-f d={d} fill="none" stroke={ACCENT} strokeOpacity={0.35} strokeWidth={sw + 5} strokeLinejoin="round" />}
+        {selected && <path data-f className="box-halo" d={d} fill="none" stroke={ACCENT} strokeOpacity={0.35} strokeWidth={sw + 5} strokeLinejoin="round" />}
         <path data-f className="box-main" d={d} fill={fill} stroke={data.dash === 'none' ? 'none' : stroke} strokeWidth={sw}
           strokeDasharray={data.dash === 'dashed' ? '6 4' : undefined} strokeLinejoin="round" />
         {data.shape === 'memo-lined' && (
@@ -182,7 +187,7 @@ function BoxEditor({ id, data }: { id: string; data: BoxData }) {
   const onFocus = ({ editor }: { editor: Parameters<typeof htmlOf>[0] }) => useEd.setState({ active: editor })
 
   const title = useEditor({
-    extensions: richExtensions('제목'),
+    extensions: richExtensions(t('제목')),
     content: data.title,
     onUpdate: save('title'),
     onFocus,
@@ -197,7 +202,7 @@ function BoxEditor({ id, data }: { id: string; data: BoxData }) {
     },
   })
   const body = useEditor({
-    extensions: richExtensions('설명'),
+    extensions: richExtensions(t('설명')),
     content: data.body,
     onUpdate: save('body'),
     onFocus,
@@ -234,7 +239,7 @@ function MediaList({ id, media, editing }: { id: string; media: MediaItem[]; edi
       {media.map((m) => (
         <div key={m.id} className="media-item">
           <MediaView m={m} />
-          {editing && <button className="media-x nodrag" aria-label="삭제" onClick={() => remove(m.id)}><X size={12} /></button>}
+          {editing && <button className="media-x nodrag" aria-label={t('삭제')} onClick={() => remove(m.id)}><X size={12} /></button>}
         </div>
       ))}
     </div>
@@ -260,7 +265,7 @@ function YouTube({ id }: { id: string }) {
     <div className="yt nodrag">
       {play
         ? <iframe src={`https://www.youtube-nocookie.com/embed/${id}?autoplay=1`} allow="autoplay; encrypted-media; picture-in-picture" allowFullScreen title="YouTube" />
-        : <button onClick={() => setPlay(true)} aria-label="재생"><img src={`https://i.ytimg.com/vi/${id}/hqdefault.jpg`} alt="" /><span className="yt-play"><Play size={18} fill="currentColor" /></span></button>}
+        : <button onClick={() => setPlay(true)} aria-label={t('재생')}><img src={`https://i.ytimg.com/vi/${id}/hqdefault.jpg`} alt="" /><span className="yt-play"><Play size={18} fill="currentColor" /></span></button>}
     </div>
   )
 }

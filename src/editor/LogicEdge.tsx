@@ -2,13 +2,13 @@ import { memo, useState } from 'react'
 import { BaseEdge, EdgeLabelRenderer, getBezierPath, getSmoothStepPath, getStraightPath, type EdgeProps } from '@xyflow/react'
 import { ACCENT, INK, themeMap } from '../lib/color'
 import { defaultEdge } from '../lib/shapes'
-import { useTheme } from '../lib/store'
 import type { LogicEdge as LogicEdgeT } from '../lib/types'
 import { RelIcon } from '../ui/kit'
-import { patchEdges, useEd } from './store'
+import { patchEdges, useEd, useLook } from './store'
+import { t } from '../lib/i18n'
 
 export const LogicEdge = memo(function LogicEdge(p: EdgeProps<LogicEdgeT>) {
-  const theme = useTheme()
+  const { theme } = useLook()
   const d = { ...defaultEdge(), ...p.data }
   const editing = useEd((s) => s.editingEdge === p.id)
   // 집합 안의 선은 높이(zIndex)가 올라가므로 라벨도 같은 높이로 (선 위, 상자 아래)
@@ -47,7 +47,7 @@ function LabelInput({ id, value }: { id: string; value: string }) {
   const [v, setV] = useState(value)
   const done = () => { if (v !== value) patchEdges([id], { label: v.trim() }); useEd.setState({ editingEdge: null }) }
   return (
-    <input autoFocus value={v} size={Math.max(4, v.length + 1)} placeholder="라벨" onChange={(e) => setV(e.target.value)} onBlur={done}
+    <input autoFocus value={v} size={Math.max(4, v.length + 1)} placeholder={t('라벨')} onChange={(e) => setV(e.target.value)} onBlur={done}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === 'Escape') { e.preventDefault(); done() } }} />
   )
 }

@@ -5,6 +5,7 @@ import { colorName } from './color'
 import { hierarchy } from './sets'
 import type { EdgeAttributesObject, NodeAttributesObject, SubgraphAttributesObject } from 'ts-graphviz'
 import type { BoxNode, EdgeData, LogicEdge, Shape } from './types'
+import { t } from '../lib/i18n'
 
 // ── 공통 ──
 /** 서식 있는 글 → 줄 목록. 목록 항목엔 -, 1., [x] 표시를 붙인다 */
@@ -161,7 +162,7 @@ export async function toDotCode(nodes: BoxNode[], edges: LogicEdge[]): Promise<s
 }
 
 // ── AI용 개요 ──
-const SHAPE_NAME: Partial<Record<Shape, string>> = { ellipse: '원', diamond: '마름모', para: '평행사변형', hex: '육각형', memo: '메모지', 'memo-lined': '줄 메모지' }
+const SHAPE_NAME: Partial<Record<Shape, string>> = { ellipse: t('원'), diamond: t('마름모'), para: t('평행사변형'), hex: t('육각형'), memo: t('메모지'), 'memo-lined': t('줄 메모지') }
 const ARROW = { end: '→', both: '↔', none: '—' } as const
 
 /**
@@ -182,18 +183,18 @@ export function toOutline(title: string, nodes: BoxNode[], edges: LogicEdge[]): 
   }
 
   const name = (n: BoxNode) => {
-    const t = lines(n.data.title).join(' ')
-    if (t) return t
+    const ti = lines(n.data.title).join(' ')
+    if (ti) return ti
     const b = lines(n.data.body)[0]
-    return b ? (b.length > 40 ? b.slice(0, 40) + '…' : b) : '(빈 상자)'
+    return b ? (b.length > 40 ? b.slice(0, 40) + '…' : b) : t('(빈 상자)')
   }
   const edgeMeta = (e: LogicEdge) => {
     const d = e.data!
     const m = [
-      d.rel && `관계 ${d.rel}`, d.label && `"${d.label.replace(/\s+/g, ' ').trim()}"`,
-      d.dashed && '점선', d.width >= 2.5 && '굵은 선', d.color && colorName(d.color),
+      d.rel && t('관계 {{rel}}', { rel: d.rel }), d.label && `"${d.label.replace(/\s+/g, ' ').trim()}"`,
+      d.dashed && t('점선'), d.width >= 2.5 && t('굵은 선'), d.color && colorName(d.color),
     ].filter(Boolean)
-    return m.length ? `  (선: ${m.join(', ')})` : ''
+    return m.length ? `  (${t('선')}: ${m.join(', ')})` : ''
   }
 
   const num = new Map<string, number>()
@@ -229,39 +230,39 @@ export function toOutline(title: string, nodes: BoxNode[], edges: LogicEdge[]): 
   if (flow.length && alone.length) flow.push('')
   for (const n of alone) {
     num.set(n.id, num.size + 1)
-    if (linked.length) flow.push(`[${num.get(n.id)}] ${name(n)} (연결 없음)`)
+    if (linked.length) flow.push(`[${num.get(n.id)}] ${name(n)} (${t('연결 없음')})`)
   }
 
   const details: string[] = []
   for (const n of [...nodes].sort((a, b) => num.get(a.id)! - num.get(b.id)!)) {
-    const d = n.data, t = lines(d.title).join(' '), body = lines(d.body), tc = firstColor(d.title)
+    const d = n.data, ti = lines(d.title).join(' '), body = lines(d.body), tc = firstColor(d.title)
     const tags = [
-      SHAPE_NAME[d.shape], d.fill && `${colorName(d.fill)} 채움`, d.dash !== 'none' && d.stroke && `${colorName(d.stroke)} 테두리`,
-      d.dash === 'dashed' && '점선 테두리', d.dash === 'none' && '테두리 없음', tc && `글자 ${colorName(tc)}`,
+      SHAPE_NAME[d.shape], d.fill && t('{{color}} 채움', { color: colorName(d.fill) }), d.dash !== 'none' && d.stroke && t('{{color}} 테두리', { color: colorName(d.stroke) }),
+      d.dash === 'dashed' && t('점선 테두리'), d.dash === 'none' && t('테두리 없음'), tc && t('글자 {{color}}', { color: colorName(tc) }),
     ].filter(Boolean)
-    const media = [['image', '이미지'], ['video', '영상']]
-      .map(([k, label]) => [label, d.media.filter((m) => m.kind === k).length] as const).filter(([, c]) => c).map(([l, c]) => `${l} ${c}개`)
+    const media = [['image', t('이미지')], ['video', t('영상')]]
+      .map(([k, label]) => [label, d.media.filter((m) => m.kind === k).length] as const).filter(([, c]) => c).map(([l, c]) => t('{{what}} {{count}}개', { what: l, count: c }))
     // 흐름·포함 관계에서 이미 다 보인 상자(제목뿐)는 다시 적지 않는다
-    if ((linked.length || sets.length) && t && !body.length && !tags.length && !media.length) continue
-    details.push(`[${num.get(n.id)}] ${t || '(제목 없음)'}${tags.length ? `  (상자: ${tags.join(', ')})` : ''}`)
+    if ((linked.length || sets.length) && ti && !body.length && !tags.length && !media.length) continue
+    details.push(`[${num.get(n.id)}] ${ti || t('(제목 없음)')}${tags.length ? `  (${t('상자')}: ${tags.join(', ')})` : ''}`)
     details.push(...body.map((l) => '    ' + l))
-    if (media.length) details.push(`    (첨부: ${media.join(', ')} — 글로 옮기지 못함)`)
+    if (media.length) details.push(`    (${t('첨부: {{list}} — 글로 옮기지 못함', { list: media.join(', ') })})`)
   }
 
   const out = [
-    `# ${title || '제목 없음'}`, '',
-    `Logic Note에서 내보낸 논리 도식 · 상자 ${nodes.length}개 · 연결 ${linked.length}개${parentOf.size ? ` · 포함 관계 ${parentOf.size}개` : ''}`,
+    `# ${title || t('제목 없음')}`, '',
+    t('Logic Note에서 내보낸 논리 도식 · 상자 {{n}}개 · 연결 {{e}}개', { n: nodes.length, e: linked.length }) + (parentOf.size ? t(' · 포함 관계 {{s}}개', { s: parentOf.size }) : ''),
   ]
   if (linked.length || sets.length) out.push(...[
-    '읽는 법: [번호]는 상자.',
-    linked.length && '→ 화살표, ↔ 양방향, — 방향 없는 선. (선: …)은 선에 붙은 말과 모양.',
-    linked.length && '↺는 위에 이미 나온 상자로 다시 이어진다는 뜻(되먹임·합류).',
-    linked.some((e) => e.data?.rel) && '관계 =, ≠, ≈는 선으로 이은 두 상자가 같음·같지 않음·비슷함.',
-    sets.length && '⊃는 위 상자(집합)가 들여쓴 아래 상자를 포함한다는 뜻.',
+    t('읽는 법: [번호]는 상자.'),
+    linked.length && t('→ 화살표, ↔ 양방향, — 방향 없는 선. (선: …)은 선에 붙은 말과 모양.'),
+    linked.length && t('↺는 위에 이미 나온 상자로 다시 이어진다는 뜻(되먹임·합류).'),
+    linked.some((e) => e.data?.rel) && t('관계 =, ≠, ≈는 선으로 이은 두 상자가 같음·같지 않음·비슷함.'),
+    sets.length && t('⊃는 위 상자(집합)가 들여쓴 아래 상자를 포함한다는 뜻.'),
   ].filter((l): l is string => !!l))
-  if (linked.length) out.push('', '## 흐름', '', ...flow)
-  if (sets.length) out.push('', '## 포함 관계 (집합)', '', ...sets)
-  if (details.length) out.push('', linked.length || sets.length ? '## 상자 내용' : '## 상자', '', ...details)
+  if (linked.length) out.push('', t('## 흐름'), '', ...flow)
+  if (sets.length) out.push('', t('## 포함 관계 (집합)'), '', ...sets)
+  if (details.length) out.push('', linked.length || sets.length ? t('## 상자 내용') : t('## 상자'), '', ...details)
   return out.join('\n')
 }
 
@@ -334,7 +335,7 @@ export async function captureImage(
   }
   if (format === 'svg') return (await fetch(await toSvg(viewport, options))).blob()
   const blob = await toBlob(viewport, options)
-  if (!blob) throw new Error('그림을 만들지 못했어요.')
+  if (!blob) throw new Error(t('그림을 만들지 못했어요.'))
   return blob
 }
 
@@ -348,4 +349,4 @@ export function download(blob: Blob, name: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
-export const fileName = (title: string, ext: string) => `${(title || '제목 없음').replace(/[\\/:*?"<>|]+/g, ' ').trim()}.${ext}`
+export const fileName = (title: string, ext: string) => `${(title || t('제목 없음')).replace(/[\\/:*?"<>|]+/g, ' ').trim()}.${ext}`

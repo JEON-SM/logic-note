@@ -12,6 +12,7 @@ import { toast } from '../ui/Toast'
 import {
   CLIP_MARK, addBox, copySelection, effDefaults, cutSelection, groupSelection, hasClip, pasteClip, patchNodes, selectedNodes, startEditing, takeOut, useEd,
 } from './store'
+import { t } from '../lib/i18n'
 
 type Ctx = { kind: 'nodes' } | { kind: 'edge'; id: string } | { kind: 'pane'; at: XYPosition }
 type Box = { x0: number; y0: number; x1: number; y1: number }
@@ -117,16 +118,16 @@ function NodeItems() {
   const sized = sel.some((n) => n.data.w || n.data.h)
   return (
     <>
-      <div className="menu-label">상자 {ids.length}개</div>
-      <CItem icon={<Copy size={15} />} hint="Ctrl+C" onSelect={() => { if (copySelection()) { markClip(); toast(`${ids.length}개 복사했어요`) } }}>복사</CItem>
-      <CItem icon={<Scissors size={15} />} hint="Ctrl+X" onSelect={() => { if (cutSelection()) markClip() }}>잘라내기</CItem>
-      <CItem icon={<BoxSelect size={15} />} hint="Ctrl+D" onSelect={() => { if (copySelection()) pasteClip() }}>복제</CItem>
-      <CItem icon={<Trash2 size={15} />} hint="Del" danger onSelect={() => rf.deleteElements({ nodes: ids.map((id) => ({ id })) })}>삭제</CItem>
+      <div className="menu-label">{t('상자 {{count}}개', { count: ids.length })}</div>
+      <CItem icon={<Copy size={15} />} hint="Ctrl+C" onSelect={() => { if (copySelection()) { markClip(); toast(t('{{count}}개 복사했어요', { count: ids.length })) } }}>{t('복사')}</CItem>
+      <CItem icon={<Scissors size={15} />} hint="Ctrl+X" onSelect={() => { if (cutSelection()) markClip() }}>{t('잘라내기')}</CItem>
+      <CItem icon={<BoxSelect size={15} />} hint="Ctrl+D" onSelect={() => { if (copySelection()) pasteClip() }}>{t('복제')}</CItem>
+      <CItem icon={<Trash2 size={15} />} hint="Del" danger onSelect={() => rf.deleteElements({ nodes: ids.map((id) => ({ id })) })}>{t('삭제')}</CItem>
       <CSep />
-      <CItem icon={<LogIn size={15} />} onSelect={() => startPicking(ids)}>다른 상자에 넣기…</CItem>
-      <CItem icon={<Group size={15} />} hint="Ctrl+G" onSelect={groupSelection}>집합으로 묶기</CItem>
-      {inSet && <CItem icon={<LogOut size={15} />} hint="Ctrl+Shift+G" onSelect={() => takeOut(ids)}>집합에서 꺼내기</CItem>}
-      {sized && <CItem icon={<Scaling size={15} />} onSelect={() => patchNodes(ids, { w: null, h: null, wrap: null })}>크기 자동 맞춤</CItem>}
+      <CItem icon={<LogIn size={15} />} onSelect={() => startPicking(ids)}>{t('다른 상자에 넣기…')}</CItem>
+      <CItem icon={<Group size={15} />} hint="Ctrl+G" onSelect={groupSelection}>{t('집합으로 묶기')}</CItem>
+      {inSet && <CItem icon={<LogOut size={15} />} hint="Ctrl+Shift+G" onSelect={() => takeOut(ids)}>{t('집합에서 꺼내기')}</CItem>}
+      {sized && <CItem icon={<Scaling size={15} />} onSelect={() => patchNodes(ids, { w: null, h: null, wrap: null })}>{t('크기 자동 맞춤')}</CItem>}
     </>
   )
 }
@@ -135,8 +136,8 @@ function EdgeItems({ id }: { id: string }) {
   const rf = useReactFlow()
   return (
     <>
-      <CItem icon={<Tag size={15} />} onSelect={() => useEd.setState({ editingEdge: id })}>라벨 쓰기</CItem>
-      <CItem icon={<Trash2 size={15} />} hint="Del" danger onSelect={() => rf.deleteElements({ edges: [{ id }] })}>선 삭제</CItem>
+      <CItem icon={<Tag size={15} />} onSelect={() => useEd.setState({ editingEdge: id })}>{t('라벨 쓰기')}</CItem>
+      <CItem icon={<Trash2 size={15} />} hint="Del" danger onSelect={() => rf.deleteElements({ edges: [{ id }] })}>{t('선 삭제')}</CItem>
     </>
   )
 }
@@ -145,12 +146,12 @@ function PaneItems({ at }: { at: XYPosition }) {
   const add = (shape: Parameters<typeof addBox>[1]) => startEditing(addBox(at, shape))
   return (
     <>
-      <CItem icon={<Square size={15} />} onSelect={() => add(effDefaults().shape)}>여기에 상자</CItem>
-      <CItem icon={<StickyNote size={15} />} onSelect={() => add('memo')}>여기에 메모지</CItem>
-      <CItem icon={<NotebookPen size={15} />} onSelect={() => add('memo-lined')}>여기에 줄 메모지</CItem>
+      <CItem icon={<Square size={15} />} onSelect={() => add(effDefaults().shape)}>{t('여기에 상자')}</CItem>
+      <CItem icon={<StickyNote size={15} />} onSelect={() => add('memo')}>{t('여기에 메모지')}</CItem>
+      <CItem icon={<NotebookPen size={15} />} onSelect={() => add('memo-lined')}>{t('여기에 줄 메모지')}</CItem>
       <CSep />
-      <CItem icon={<ClipboardPaste size={15} />} hint="Ctrl+V" disabled={!hasClip()} onSelect={() => pasteClip()}>붙여넣기</CItem>
-      <CItem icon={<BoxSelect size={15} />} hint="Ctrl+A" onSelect={() => useEd.setState((s) => ({ nodes: s.nodes.map((n) => ({ ...n, selected: true })) }))}>모두 선택</CItem>
+      <CItem icon={<ClipboardPaste size={15} />} hint="Ctrl+V" disabled={!hasClip()} onSelect={() => pasteClip()}>{t('붙여넣기')}</CItem>
+      <CItem icon={<BoxSelect size={15} />} hint="Ctrl+A" onSelect={() => useEd.setState((s) => ({ nodes: s.nodes.map((n) => ({ ...n, selected: true })) }))}>{t('모두 선택')}</CItem>
     </>
   )
 }

@@ -4,6 +4,7 @@
 import { db, onLocalChange, uid } from './db'
 import { useSettings, useSync } from './store'
 import type { Folder, Note } from './types'
+import { t } from '../lib/i18n'
 
 const API = 'https://www.googleapis.com'
 const SCOPE = 'https://www.googleapis.com/auth/drive.file'
@@ -23,14 +24,14 @@ export const remoteEvents = new EventTarget()
 function loadGis() {
   if (window.google?.accounts?.oauth2) return Promise.resolve()
   return new Promise<void>((res, rej) => {
-    const s = Object.assign(document.createElement('script'), { src: 'https://accounts.google.com/gsi/client', onload: () => res(), onerror: () => rej(new Error('Google 로그인 스크립트를 불러오지 못했습니다.')) })
+    const s = Object.assign(document.createElement('script'), { src: 'https://accounts.google.com/gsi/client', onload: () => res(), onerror: () => rej(new Error(t('Google 로그인 스크립트를 불러오지 못했습니다.'))) })
     document.head.appendChild(s)
   })
 }
 
 export async function connect() {
   const clientId = useSettings.getState().clientId.trim() || BUILTIN_CLIENT_ID
-  if (!clientId) throw new Error('Google OAuth 클라이언트 ID를 먼저 입력하세요.')
+  if (!clientId) throw new Error(t('Google OAuth 클라이언트 ID를 먼저 입력하세요.'))
   await loadGis()
   await new Promise<void>((resolve, reject) => {
     const client = window.google.accounts.oauth2.initTokenClient({
@@ -43,7 +44,7 @@ export async function connect() {
         localStorage.setItem('ln.linked', '1')
         resolve()
       },
-      error_callback: (e: any) => reject(new Error(e?.type === 'popup_closed' ? '로그인 창이 닫혔습니다.' : e?.message || '로그인 실패')),
+      error_callback: (e: any) => reject(new Error(e?.type === 'popup_closed' ? t('로그인 창이 닫혔습니다.') : e?.message || t('로그인 실패'))),
     })
     client.requestAccessToken({ prompt: localStorage.getItem('ln.linked') ? '' : 'consent' })
   })
@@ -204,7 +205,7 @@ export async function sync() {
       const incoming: Note = { ...data, id: lid, folderId, updatedAt: u, driveId: rn.id, syncedAt: u, dirty: 0 }
       if (ln && dirty(ln) && !ln.deleted && !sameContent(ln, incoming)) {
         // 양쪽 모두 바뀜: 진 쪽을 사본으로 남긴다
-        const loser = ln.updatedAt > u ? { ...incoming, title: (data.title || '제목 없음') + ' (다른 기기)' } : { ...ln, title: (ln.title || '제목 없음') + ' (이 기기)' }
+        const loser = ln.updatedAt > u ? { ...incoming, title: (data.title || t('제목 없음')) + t(' (다른 기기)') } : { ...ln, title: (ln.title || t('제목 없음')) + t(' (이 기기)') }
         await db.notes.add({ ...loser, id: uid(), driveId: undefined, syncedAt: undefined, updatedAt: Date.now(), dirty: 1 })
         if (ln.updatedAt > u) continue
       }
@@ -230,7 +231,7 @@ export async function sync() {
       const parent = folder?.driveId || dirs.root
       const { driveId, syncedAt, dirty: _d, ...payload } = ln
       const u = nextU(ln.updatedAt, byLid.get(ln.id))
-      const meta = { name: (ln.title || '제목 없음') + '.lnote', appProperties: { ln: 'note', lid: ln.id, u: String(u) } }
+      const meta = { name: (ln.title || t('제목 없음')) + '.lnote', appProperties: { ln: 'note', lid: ln.id, u: String(u) } }
       const content = JSON.stringify(payload)
       if (!driveId) {
         const r = await json('/upload/drive/v3/files?uploadType=multipart&fields=id', { method: 'POST', ...multipart({ ...meta, mimeType: 'application/json', parents: [parent] }, content) })

@@ -4,6 +4,7 @@
 import type { MermaidConfig } from 'mermaid'
 import { textVars } from './color'
 import { plain, uid } from './db'
+import { lang, t } from './i18n'
 import { defaultBox, defaultEdge, outerSize } from './shapes'
 import type { BoxNode, EdgeData, LogicEdge, Rel, Shape } from './types'
 
@@ -14,7 +15,15 @@ interface GEdge { from: string; to: string; label: string; rel?: Rel; arrow: Edg
 interface Graph { dir: Dir; title: string; nodes: GNode[]; edges: GEdge[] }
 export interface Imported { title: string; nodes: BoxNode[]; edges: LogicEdge[]; source: 'Mermaid' | 'Graphviz' }
 
-export const AI_PROMPT = `아래 내용을 논리 도식으로 그려줘. 설명 없이 Mermaid flowchart 코드 블록 하나로만 답해줘.
+export const AI_PROMPT = lang === 'en' ? `Draw the content below as a logic diagram. Reply with a single Mermaid flowchart code block only, no explanation.
+- Premises and evidence as rounded boxes A(…), decisions and conditions as diamonds B{…}, conclusions as rectangles C[…]
+- Label arrows when useful: A -->|reason| B
+- Use <br> for a line break inside a box
+- To add a description to a box, bold the title and wrap it in quotes: A("<b>Title</b><br>Description")
+- If something contains other things (a set), wrap them in a subgraph: subgraph S["Container"] … end
+- For equal / not-equal relations, start the label with = or ≠: A ---|=| B
+
+Content: ` : `아래 내용을 논리 도식으로 그려줘. 설명 없이 Mermaid flowchart 코드 블록 하나로만 답해줘.
 - 전제·근거는 둥근 상자 A(…), 판단·조건은 마름모 B{…}, 결론은 사각형 C[…]
 - 화살표에 필요하면 라벨을 붙여줘: A -->|이유| B
 - 한 상자 안에서 줄을 바꿀 땐 <br>
@@ -158,7 +167,7 @@ async function parseMermaid(code: string): Promise<Graph> {
     return { dir: 'LR', title, nodes, edges }
   }
   if (!diagram.type.startsWith('flowchart') && diagram.type !== 'graph')
-    throw new Error(`'${diagram.type}' 도식은 아직 지원하지 않아요. flowchart(graph)나 mindmap으로 요청해 주세요.`)
+    throw new Error(t("'{{type}}' 도식은 아직 지원하지 않아요. flowchart(graph)나 mindmap으로 요청해 주세요.", { type: diagram.type }))
 
   const classes: Map<string, { styles: string[]; textStyles?: string[] }> = db.getClasses()
   const cls = (name: string) => [...(classes.get(name)?.styles ?? []), ...(classes.get(name)?.textStyles ?? [])]
@@ -384,16 +393,16 @@ async function layout(gr: Graph, kind: EdgeData['kind']): Promise<{ nodes: BoxNo
 export async function parseDiagram(text: string, kind: EdgeData['kind'] = 'bezier'): Promise<Imported> {
   const code = extractCode(text)
   const k = kindOf(code)
-  if (!k) throw new Error('Mermaid(flowchart·graph·mindmap) 또는 Graphviz(digraph) 코드를 찾지 못했어요.')
+  if (!k) throw new Error(t('Mermaid(flowchart·graph·mindmap) 또는 Graphviz(digraph) 코드를 찾지 못했어요.'))
   let gr: Graph
   try {
     gr = k === 'dot' ? await parseDot(code) : await parseMermaid(code)
   } catch (e) {
     const msg = (e as Error).message ?? String(e)
-    throw new Error(msg.includes('지원하지') ? msg : `코드를 읽지 못했어요: ${msg.split('\n')[0].slice(0, 160)}`)
+    throw new Error(msg.startsWith("'") ? msg : t('코드를 읽지 못했어요: {{msg}}', { msg: msg.split('\n')[0].slice(0, 160) }))
   }
-  if (!gr.nodes.length) throw new Error('도식에 상자가 없어요.')
+  if (!gr.nodes.length) throw new Error(t('도식에 상자가 없어요.'))
   const { nodes, edges } = await layout(gr, kind)
-  const title = gr.title || plain(nodes[0].data.title) || '가져온 도식'
+  const title = gr.title || plain(nodes[0].data.title) || t('가져온 도식')
   return { title, nodes, edges, source: k === 'dot' ? 'Graphviz' : 'Mermaid' }
 }

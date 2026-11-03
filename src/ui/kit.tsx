@@ -1,13 +1,30 @@
 import { useState, type ReactNode, type ButtonHTMLAttributes } from 'react'
 import { ContextMenu, DropdownMenu, Popover } from 'radix-ui'
+import { AnimatePresence, motion } from 'motion/react'
 import { Check } from 'lucide-react'
 import { HexColorInput, HexColorPicker } from 'react-colorful'
 import { PALETTE, themeMap } from '../lib/color'
 import { pushRecent, useSettings, useTheme } from '../lib/store'
 import { shapePath } from '../lib/shapes'
 import type { Rel, Shape } from '../lib/types'
+import { t } from '../lib/i18n'
 
 export const cls = (...a: unknown[]) => a.filter(Boolean).join(' ')
+
+/** 앱 전체의 움직임 곡선: 빠르게 나와 부드럽게 멈춘다 */
+export const EASE = [0.22, 1, 0.36, 1] as const
+
+/** 펼치고 접는 부분 (높이가 부드럽게 바뀜) */
+export const Collapse = ({ open, children }: { open: boolean; children: ReactNode }) => (
+  <AnimatePresence initial={false}>
+    {open && (
+      <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
+        transition={{ duration: 0.22, ease: EASE }} style={{ overflow: 'hidden' }}>
+        {children}
+      </motion.div>
+    )}
+  </AnimatePresence>
+)
 
 export const Logo = ({ size = 24 }: { size?: number }) => {
   const dark = useTheme() === 'dark'
@@ -126,7 +143,7 @@ export function ColorButton({ value, onChange, label, icon, palette = PALETTE, n
   )
 }
 
-function ColorPanel({ value, onChange, palette, none }: { value: string | null; onChange: (c: string | null) => void; palette: string[]; none?: string }) {
+export function ColorPanel({ value, onChange, palette, none }: { value: string | null; onChange: (c: string | null) => void; palette: string[]; none?: string }) {
   const theme = useTheme()
   const recent = useSettings((s) => s.recent)
   const [adv, setAdv] = useState(false)
@@ -138,8 +155,8 @@ function ColorPanel({ value, onChange, palette, none }: { value: string | null; 
     <div className="cpanel">
       {none && <button type="button" className={cls('cp-none', !value && 'on')} onClick={() => onChange(null)}>{none}</button>}
       <div className="sw-grid">{palette.map(sw)}</div>
-      {recent.length > 0 && (<><div className="cp-label">최근 사용</div><div className="sw-grid">{recent.map(sw)}</div></>)}
-      <button type="button" className="cp-adv" onClick={() => setAdv(!adv)}>{adv ? '간단히' : '고급 설정'}</button>
+      {recent.length > 0 && (<><div className="cp-label">{t('최근 사용')}</div><div className="sw-grid">{recent.map(sw)}</div></>)}
+      <button type="button" className="cp-adv" onClick={() => setAdv(!adv)}>{adv ? t('간단히') : t('고급 설정')}</button>
       {adv && <Advanced initial={value ? themeMap(value, theme) : '#FF5F1F'} onPick={(c) => choose(themeMap(c.toUpperCase(), theme))} />}
     </div>
   )
@@ -153,7 +170,7 @@ function Advanced({ initial, onPick }: { initial: string; onPick: (c: string) =>
       <div className="cp-hexrow">
         <span className="sw" style={{ background: c }} />
         <HexColorInput color={c} onChange={setC} prefixed />
-        <button type="button" className="btn" onClick={() => onPick(c)}>적용</button>
+        <button type="button" className="btn" onClick={() => onPick(c)}>{t('적용')}</button>
       </div>
     </div>
   )

@@ -9,6 +9,7 @@ import { Markdown } from '@tiptap/markdown'
 import type { EditorView } from '@tiptap/pm/view'
 import DOMPurify from 'dompurify'
 import { highlightAttrs, textVars } from './color'
+import { t } from '../lib/i18n'
 
 // 글자색: 배경 밝기에 따라 무채색을 자동 반전할 수 있게 CSS 변수로 렌더
 const ThemedColor = Color.extend({
@@ -39,11 +40,11 @@ const ThemedHighlight = Highlight.extend({
 }).configure({ multicolor: true })
 
 export const FONTS = [
-  { label: '기본', value: '' },
-  { label: '명조', value: "'Noto Serif KR', serif" },
-  { label: '둥근 고딕', value: "'Gowun Dodum', sans-serif" },
-  { label: '손글씨', value: "'Nanum Pen Script', cursive" },
-  { label: '코드', value: "'JetBrains Mono', monospace" },
+  { label: t('기본'), value: '' },
+  { label: t('명조'), value: "'Noto Serif KR', serif" },
+  { label: t('둥근 고딕'), value: "'Gowun Dodum', sans-serif" },
+  { label: t('손글씨'), value: "'Nanum Pen Script', cursive" },
+  { label: t('코드'), value: "'JetBrains Mono', monospace" },
 ]
 /** 글자 크기 (pt) */
 export const SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48, 72]

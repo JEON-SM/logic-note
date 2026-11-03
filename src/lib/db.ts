@@ -1,5 +1,6 @@
 import Dexie, { type EntityTable } from 'dexie'
-import type { Folder, LinkMeta, Note, Paper } from './types'
+import type { Folder, LinkMeta, Note } from './types'
+import { t } from '../lib/i18n'
 
 export interface MediaRec { id: string; blob: Blob; type: string; driveId?: string }
 export interface PreviewRec { url: string; data: LinkMeta | null; at: number }
@@ -60,9 +61,9 @@ export async function deleteFolder(id: string) {
 /** 이번에 '새 노트'로 만든 노트. 아무것도 안 하고 나가면 지운다 */
 export const freshNotes = new Set<string>()
 
-export async function createNote(folderId: string | null, paper: Paper | null = null) {
+export async function createNote(folderId: string | null, extra: Partial<Note> = {}) {
   const t = Date.now()
-  const n: Note = { id: uid(), folderId, title: '', nodes: [], edges: [], ...(paper && { paper }), createdAt: t, updatedAt: t, dirty: 1 }
+  const n: Note = { id: uid(), folderId, title: '', nodes: [], edges: [], ...extra, createdAt: t, updatedAt: t, dirty: 1 }
   await db.notes.add(n)
   changed()
   return n
@@ -76,8 +77,8 @@ export async function updateNote(id: string, patch: Partial<Note>, touch = true)
 export async function duplicateNote(id: string) {
   const n = await db.notes.get(id)
   if (!n) return
-  const t = Date.now()
-  await db.notes.add({ ...n, id: uid(), title: (n.title || '제목 없음') + ' 사본', createdAt: t, updatedAt: t, dirty: 1, driveId: undefined, syncedAt: undefined })
+  const now = Date.now()
+  await db.notes.add({ ...n, id: uid(), title: (n.title || t('제목 없음')) + t(' 사본'), createdAt: now, updatedAt: now, dirty: 1, driveId: undefined, syncedAt: undefined })
   changed()
 }
 
@@ -113,7 +114,7 @@ export async function exportAll() {
 
 export async function importAll(file: File) {
   const data = JSON.parse(await file.text())
-  if (data.app !== 'logic-note') throw new Error('Logic Note 백업 파일이 아닙니다.')
+  if (data.app !== 'logic-note') throw new Error(t('Logic Note 백업 파일이 아닙니다.'))
   const strip = <T extends { driveId?: string; syncedAt?: number }>(x: T) => ({ ...x, dirty: 1, driveId: undefined, syncedAt: undefined })
   await db.transaction('rw', db.folders, db.notes, db.media, async () => {
     await db.folders.bulkPut(data.folders.map(strip))

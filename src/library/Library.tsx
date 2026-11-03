@@ -10,24 +10,27 @@ import {
 } from '../lib/db'
 import { go, setSettings, useSettings, useTheme, type Route } from '../lib/store'
 import type { Folder, Note } from '../lib/types'
-import { cls, IB, Item, Logo, Menu, MenuSep } from '../ui/kit'
+import { AnimatePresence, motion } from 'motion/react'
+import { Collapse, EASE, cls, IB, Item, Logo, Menu, MenuSep } from '../ui/kit'
 import { confirmDanger, pickFolder, promptText } from '../ui/Dialogs'
 import { openSettings, SyncButton } from '../ui/Settings'
 import { openImport } from '../ui/ImportDialog'
+import { groundLook } from '../lib/color'
 import { paperOf } from '../lib/pages'
 import { NoteThumb } from './NoteThumb'
+import { locale, t } from '../lib/i18n'
 
 const DRAG = 'application/x-ln-note'
 const DRAG_F = 'application/x-ln-folder'
 const fmtDate = (t: number) => {
   const d = new Date(t), now = new Date()
   return d.toDateString() === now.toDateString()
-    ? d.toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' })
-    : d.toLocaleDateString('ko-KR', { year: d.getFullYear() === now.getFullYear() ? undefined : 'numeric', month: 'short', day: 'numeric' })
+    ? d.toLocaleTimeString(locale, { hour: 'numeric', minute: '2-digit' })
+    : d.toLocaleDateString(locale, { year: d.getFullYear() === now.getFullYear() ? undefined : 'numeric', month: 'short', day: 'numeric' })
 }
 
 async function newFolder(parentId: string | null) {
-  const name = await promptText(parentId ? '새 하위 폴더' : '새 폴더', '', '만들기')
+  const name = await promptText(parentId ? t('새 하위 폴더') : t('새 폴더'), '', t('만들기'))
   if (!name) return
   const f = await createFolder(name, parentId)
   if (parentId) setSettings({ expanded: [...new Set([...useSettings.getState().expanded, parentId])] })
@@ -35,7 +38,7 @@ async function newFolder(parentId: string | null) {
 }
 
 async function newGroup() {
-  const name = await promptText('새 그룹 (폴더를 묶어요)', '', '만들기')
+  const name = await promptText(t('새 그룹 (폴더를 묶어요)'), '', t('만들기'))
   if (name) await createFolder(name, null, true)
 }
 
@@ -84,9 +87,11 @@ export function Library({ route }: { route: Route }) {
     sort === 'title' ? (a.title || '').localeCompare(b.title || '') : sort === 'created' ? b.createdAt - a.createdAt : b.updatedAt - a.updatedAt)
   const subfolders = route.name === 'folder' && !q ? folders.filter((f) => f.parentId === route.id).sort((a, b) => a.name.localeCompare(b.name)) : []
 
-  const title = route.name === 'trash' ? '휴지통' : route.name === 'fav' ? '즐겨찾기' : folder?.name ?? '모든 노트'
+  const title = route.name === 'trash' ? t('휴지통') : route.name === 'fav' ? t('즐겨찾기') : folder?.name ?? t('모든 노트')
   const add = async () => {
-    const n = await createNote(route.name === 'folder' && !folder?.group ? route.id : null, paperOf(useSettings.getState().paper))
+    const st = useSettings.getState()
+    const paper = paperOf(st.paper)
+    const n = await createNote(route.name === 'folder' && !folder?.group ? route.id : null, { bg: st.bg, ground: st.ground, ...(paper && { paper }) })
     freshNotes.add(n.id)
     go('#/n/' + n.id)
   }
@@ -96,7 +101,7 @@ export function Library({ route }: { route: Route }) {
       <Sidebar route={route} folders={folders} notes={live} open={drawer} onClose={() => setDrawer(false)} trashCount={notes.length - live.length} />
       <main className="lib-main">
         <header className="bar">
-          <IB label="메뉴" className="only-narrow" onClick={() => setDrawer(true)}><MenuIcon size={20} strokeWidth={1.6} /></IB>
+          <IB label={t('메뉴')} className="only-narrow" onClick={() => setDrawer(true)}><MenuIcon size={20} strokeWidth={1.6} /></IB>
           {query === null ? (
             <div className="crumbs">
               {path.length > 1 && path.slice(0, -1).map((f) => (
@@ -108,49 +113,69 @@ export function Library({ route }: { route: Route }) {
           ) : (
             <div className="search">
               <Search size={16} strokeWidth={1.6} />
-              <input autoFocus placeholder="노트 검색" value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === 'Escape' && setQuery(null)} />
-              <IB label="검색 닫기" onClick={() => setQuery(null)}><X size={16} /></IB>
+              <input autoFocus placeholder={t('노트 검색')} value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === 'Escape' && setQuery(null)} />
+              <IB label={t('검색 닫기')} onClick={() => setQuery(null)}><X size={16} /></IB>
             </div>
           )}
           <span className="grow" />
-          {query === null && <IB label="검색" onClick={() => setQuery('')}><Search size={18} strokeWidth={1.6} /></IB>}
+          {query === null && <IB label={t('검색')} onClick={() => setQuery('')}><Search size={18} strokeWidth={1.6} /></IB>}
           {route.name !== 'trash' && !folder?.group && (
-            <IB label="AI 도식 가져오기" onClick={() => openImport({ kind: 'new', folderId: route.name === 'folder' ? route.id : null })}>
+            <IB label={t('AI 도식 가져오기')} onClick={() => openImport({ kind: 'new', folderId: route.name === 'folder' ? route.id : null })}>
               <Import size={18} strokeWidth={1.6} />
             </IB>
           )}
-          <Menu align="end" trigger={<IB label="정렬"><SortAsc size={18} strokeWidth={1.6} /></IB>}>
-            <Item checked={sort === 'updated'} onSelect={() => setSettings({ sort: 'updated' })}>수정한 날짜</Item>
-            <Item checked={sort === 'created'} onSelect={() => setSettings({ sort: 'created' })}>만든 날짜</Item>
-            <Item checked={sort === 'title'} onSelect={() => setSettings({ sort: 'title' })}>제목</Item>
+          <Menu align="end" trigger={<IB label={t('정렬')}><SortAsc size={18} strokeWidth={1.6} /></IB>}>
+            <Item checked={sort === 'updated'} onSelect={() => setSettings({ sort: 'updated' })}>{t('수정한 날짜')}</Item>
+            <Item checked={sort === 'created'} onSelect={() => setSettings({ sort: 'created' })}>{t('만든 날짜')}</Item>
+            <Item checked={sort === 'title'} onSelect={() => setSettings({ sort: 'title' })}>{t('제목')}</Item>
           </Menu>
           <SyncButton />
           {route.name === 'trash' && shown.length > 0 && (
-            <button className="btn" onClick={async () => (await confirmDanger('휴지통을 비울까요?', '노트가 영구적으로 삭제됩니다.', '비우기')) && emptyTrash()}>비우기</button>
+            <button className="btn" onClick={async () => (await confirmDanger(t('휴지통을 비울까요?'), t('노트가 영구적으로 삭제됩니다.'), t('비우기'))) && emptyTrash()}>{t('비우기')}</button>
           )}
         </header>
 
         <section className="grid">
-          {subfolders.map((f) => (
-            <a key={f.id} href={'#/f/' + f.id} className="card folder-card" onDragOver={allowDrop} onDrop={(e) => onDropNote(e, f.id)}>
+          <AnimatePresence initial={false} mode="popLayout">
+          {subfolders.map((f, i) => (
+            <Rise key={f.id} i={i}><a href={'#/f/' + f.id} className="card folder-card" onDragOver={allowDrop} onDrop={(e) => onDropNote(e, f.id)}>
               <div className="thumb folder-thumb"><FolderIcon size={30} strokeWidth={1.2} /></div>
               <div className="card-meta"><div className="card-title">{f.name}</div>
-                <div className="card-sub">{live.filter((n) => n.folderId === f.id).length}개 노트</div></div>
-            </a>
+                <div className="card-sub">{t('{{count}}개 노트', { count: live.filter((n) => n.folderId === f.id).length })}</div></div>
+            </a></Rise>
           ))}
-          {shown.map((n) => <NoteCard key={n.id} note={n} theme={theme} trash={route.name === 'trash'} folderName={route.name !== 'folder' ? folders.find((f) => f.id === n.folderId)?.name : undefined} />)}
+          {shown.map((n, i) => (
+            <Rise key={n.id} i={subfolders.length + i}>
+              <NoteCard note={n} theme={theme} trash={route.name === 'trash'} folderName={route.name !== 'folder' ? folders.find((f) => f.id === n.folderId)?.name : undefined} />
+            </Rise>
+          ))}
+          </AnimatePresence>
         </section>
 
         {!shown.length && !subfolders.length && (
           <div className="empty">
             <NotebookText size={28} strokeWidth={1.2} />
-            <p>{q ? '검색 결과가 없습니다' : route.name === 'trash' ? '휴지통이 비어 있습니다' : '노트가 없습니다'}</p>
+            <p>{q ? t('검색 결과가 없습니다') : route.name === 'trash' ? t('휴지통이 비어 있습니다') : t('노트가 없습니다')}</p>
           </div>
         )}
-        {route.name !== 'trash' && !folder?.group && <button className="fab" title="새 노트" aria-label="새 노트" onClick={add}><Plus size={26} strokeWidth={1.8} /></button>}
+        {route.name !== 'trash' && !folder?.group && <button className="fab" title={t('새 노트')} aria-label={t('새 노트')} onClick={add}><Plus size={26} strokeWidth={1.8} /></button>}
       </main>
     </div>
   )
+}
+
+/** 카드: 처음엔 차례로 떠오르고, 순서가 바뀌거나 빠지면 자리를 찾아 움직인다 */
+const Rise = ({ i, children }: { i: number; children: React.ReactNode }) => (
+  <motion.div layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.94 }}
+    transition={{ duration: 0.28, ease: EASE, delay: Math.min(i, 12) * 0.025, layout: { duration: 0.3, ease: EASE } }}>
+    {children}
+  </motion.div>
+)
+
+/** 카드 미리보기 바탕: 노트 바탕색과 그에 맞춘 무늬 색 (용지 노트는 책상 색) */
+const thumbStyle = (note: Note, theme: 'light' | 'dark') => {
+  const l = groundLook(note.ground, theme)
+  return l.custom && !note.paper ? { backgroundColor: l.ground, ['--grid' as string]: l.grid } : undefined
 }
 
 function NoteCard({ note, theme, trash, folderName }: { note: Note; theme: 'light' | 'dark'; trash: boolean; folderName?: string }) {
@@ -159,24 +184,24 @@ function NoteCard({ note, theme, trash, folderName }: { note: Note; theme: 'ligh
   return (
     <div className={cls('card', menu && 'menu-open')} draggable={!trash} onDragStart={(e) => e.dataTransfer.setData(DRAG, note.id)}
       onContextMenu={(e) => { e.preventDefault(); setMenu(true) }}>
-      <button className={cls('thumb', 'bgp-' + (note.bg ?? 'grid'))} onClick={open} aria-label={note.title || '제목 없음'}>
+      <button className={cls('thumb', 'bgp-' + (note.bg ?? 'grid'))} style={thumbStyle(note, theme)} onClick={open} aria-label={note.title || t('제목 없음')}>
         <NoteThumb note={note} theme={theme} />
       </button>
       <div className="card-meta">
-        <div className="card-title" onClick={open}>{note.favorite ? <Star size={12} className="fav" fill="currentColor" /> : null}{note.title || '제목 없음'}</div>
+        <div className="card-title" onClick={open}>{note.favorite ? <Star size={12} className="fav" fill="currentColor" /> : null}{note.title || t('제목 없음')}</div>
         <div className="card-sub">{fmtDate(note.updatedAt)}{folderName && <> · {folderName}</>}</div>
       </div>
-      <Menu open={menu} onOpenChange={setMenu} align="end" trigger={<IB label="더보기" className="card-more"><MoreVertical size={16} /></IB>}>
+      <Menu open={menu} onOpenChange={setMenu} align="end" trigger={<IB label={t('더보기')} className="card-more"><MoreVertical size={16} /></IB>}>
         {trash ? (<>
-          <Item icon={<RotateCcw size={15} />} onSelect={() => restoreNote(note.id)}>복원</Item>
-          <Item icon={<Trash2 size={15} />} danger onSelect={async () => (await confirmDanger('영구 삭제할까요?', '되돌릴 수 없습니다.')) && purgeNote(note.id)}>영구 삭제</Item>
+          <Item icon={<RotateCcw size={15} />} onSelect={() => restoreNote(note.id)}>{t('복원')}</Item>
+          <Item icon={<Trash2 size={15} />} danger onSelect={async () => (await confirmDanger(t('영구 삭제할까요?'), t('되돌릴 수 없습니다.'))) && purgeNote(note.id)}>{t('영구 삭제')}</Item>
         </>) : (<>
-          <Item icon={<Star size={15} />} onSelect={() => updateNote(note.id, { favorite: note.favorite ? 0 : 1 })}>{note.favorite ? '즐겨찾기 해제' : '즐겨찾기'}</Item>
-          <Item icon={<Pencil size={15} />} onSelect={async () => { const t = await promptText('이름 변경', note.title); if (t) updateNote(note.id, { title: t }) }}>이름 변경</Item>
-          <Item icon={<FolderInput size={15} />} onSelect={async () => { const f = await pickFolder('이동할 폴더', undefined, true); if (f !== undefined) updateNote(note.id, { folderId: f }) }}>이동</Item>
-          <Item icon={<Copy size={15} />} onSelect={() => duplicateNote(note.id)}>복제</Item>
+          <Item icon={<Star size={15} />} onSelect={() => updateNote(note.id, { favorite: note.favorite ? 0 : 1 })}>{note.favorite ? t('즐겨찾기 해제') : t('즐겨찾기')}</Item>
+          <Item icon={<Pencil size={15} />} onSelect={async () => { const name = await promptText(t('이름 변경'), note.title); if (name) updateNote(note.id, { title: name }) }}>{t('이름 변경')}</Item>
+          <Item icon={<FolderInput size={15} />} onSelect={async () => { const f = await pickFolder(t('이동할 폴더'), undefined, true); if (f !== undefined) updateNote(note.id, { folderId: f }) }}>{t('이동')}</Item>
+          <Item icon={<Copy size={15} />} onSelect={() => duplicateNote(note.id)}>{t('복제')}</Item>
           <MenuSep />
-          <Item icon={<Trash2 size={15} />} danger onSelect={() => updateNote(note.id, { trashed: 1 })}>삭제</Item>
+          <Item icon={<Trash2 size={15} />} danger onSelect={() => updateNote(note.id, { trashed: 1 })}>{t('삭제')}</Item>
         </>)}
       </Menu>
     </div>
@@ -199,15 +224,15 @@ function Sidebar({ route, folders, notes, open, onClose, trashCount }: {
       <aside className={cls('side', open && 'open')}>
         <div className="brand"><Logo size={26} /><span>Logic Note</span></div>
         <nav>
-          {nav('all', '#/', <NotebookText size={18} strokeWidth={1.6} />, '모든 노트', notes.length)}
-          {nav('fav', '#/fav', <Star size={18} strokeWidth={1.6} />, '즐겨찾기', notes.filter((n) => n.favorite).length)}
-          {nav('trash', '#/trash', <Trash2 size={18} strokeWidth={1.6} />, '휴지통', trashCount)}
+          {nav('all', '#/', <NotebookText size={18} strokeWidth={1.6} />, t('모든 노트'), notes.length)}
+          {nav('fav', '#/fav', <Star size={18} strokeWidth={1.6} />, t('즐겨찾기'), notes.filter((n) => n.favorite).length)}
+          {nav('trash', '#/trash', <Trash2 size={18} strokeWidth={1.6} />, t('휴지통'), trashCount)}
         </nav>
         <div className="side-head" onDragOver={allowFolderDrop} onDrop={(e) => onDropFolder(e, null, folders)}>
-          <span>폴더</span>
-          <Menu align="end" trigger={<IB label="새 폴더·그룹"><FolderPlus size={16} strokeWidth={1.6} /></IB>}>
-            <Item icon={<FolderPlus size={15} />} onSelect={() => newFolder(null)}>새 폴더</Item>
-            <Item icon={<Layers size={15} />} onSelect={newGroup}>새 그룹 (폴더 묶음)</Item>
+          <span>{t('폴더')}</span>
+          <Menu align="end" trigger={<IB label={t('새 폴더·그룹')}><FolderPlus size={16} strokeWidth={1.6} /></IB>}>
+            <Item icon={<FolderPlus size={15} />} onSelect={() => newFolder(null)}>{t('새 폴더')}</Item>
+            <Item icon={<Layers size={15} />} onSelect={newGroup}>{t('새 그룹 (폴더 묶음)')}</Item>
           </Menu>
         </div>
         <div className="tree">
@@ -215,11 +240,11 @@ function Sidebar({ route, folders, notes, open, onClose, trashCount }: {
           {folders.filter((f) => f.group).sort((a, b) => a.name.localeCompare(b.name)).map((g) => (
             <GroupSection key={g.id} group={g} folders={folders} notes={notes} route={route} onPick={onClose} />
           ))}
-          {!folders.length && <p className="tree-empty">폴더가 없습니다</p>}
+          {!folders.length && <p className="tree-empty">{t('폴더가 없습니다')}</p>}
         </div>
         <div className="side-foot">
-          <IB label="설정" onClick={openSettings}><Settings size={18} strokeWidth={1.6} /></IB>
-          <IB label={theme === 'dark' ? '라이트 모드' : '다크 모드'} onClick={() => setSettings({ theme: theme === 'dark' ? 'light' : 'dark' })}>
+          <IB label={t('설정')} onClick={openSettings}><Settings size={18} strokeWidth={1.6} /></IB>
+          <IB label={theme === 'dark' ? t('라이트 모드') : t('다크 모드')} onClick={() => setSettings({ theme: theme === 'dark' ? 'light' : 'dark' })}>
             {theme === 'dark' ? <Sun size={18} strokeWidth={1.6} /> : <Moon size={18} strokeWidth={1.6} />}
           </IB>
         </div>
@@ -240,20 +265,22 @@ function GroupSection({ group: g, folders, notes, route, onPick }: { group: Fold
       <div className={cls('group-head', over && 'drop-on')}
         onDragOver={(e) => { allowFolderDrop(e); setOver(e.dataTransfer.types.includes(DRAG_F)) }} onDragLeave={() => setOver(false)}
         onDrop={(e) => { setOver(false); onDropFolder(e, g.id, folders) }}>
-        <button className={cls('chev', !closed && 'open')} aria-label="펼치기"
+        <button className={cls('chev', !closed && 'open')} aria-label={t('펼치기')}
           onClick={() => setSettings({ expanded: closed ? expanded.filter((x) => x !== key) : [...expanded, key] })}><ChevronRight size={14} /></button>
         <Layers size={14} strokeWidth={1.8} />
         <span onClick={() => setSettings({ expanded: closed ? expanded.filter((x) => x !== key) : [...expanded, key] })}>{g.name}</span>
         <span className="count">{count || ''}</span>
-        <Menu align="end" trigger={<IB label="그룹 메뉴" className="row-more"><MoreVertical size={14} /></IB>}>
-          <Item icon={<FolderPlus size={15} />} onSelect={() => newFolder(g.id)}>그룹에 새 폴더</Item>
-          <Item icon={<Pencil size={15} />} onSelect={async () => { const n = await promptText('그룹 이름', g.name); if (n) updateFolder(g.id, { name: n }) }}>이름 변경</Item>
+        <Menu align="end" trigger={<IB label={t('그룹 메뉴')} className="row-more"><MoreVertical size={14} /></IB>}>
+          <Item icon={<FolderPlus size={15} />} onSelect={() => newFolder(g.id)}>{t('그룹에 새 폴더')}</Item>
+          <Item icon={<Pencil size={15} />} onSelect={async () => { const n = await promptText(t('그룹 이름'), g.name); if (n) updateFolder(g.id, { name: n }) }}>{t('이름 변경')}</Item>
           <MenuSep />
-          <Item icon={<FolderOutput size={15} />} onSelect={() => ungroup(g.id)}>그룹 해제 (폴더는 그대로)</Item>
+          <Item icon={<FolderOutput size={15} />} onSelect={() => ungroup(g.id)}>{t('그룹 해제 (폴더는 그대로)')}</Item>
         </Menu>
       </div>
-      {!closed && <FolderTree parent={g.id} depth={0} folders={folders} notes={notes} route={route} onPick={onPick} />}
-      {!closed && !count && <p className="tree-empty">폴더를 여기로 끌어다 놓으세요</p>}
+      <Collapse open={!closed}>
+        <FolderTree parent={g.id} depth={0} folders={folders} notes={notes} route={route} onPick={onPick} />
+        {!count && <p className="tree-empty">{t('폴더를 여기로 끌어다 놓으세요')}</p>}
+      </Collapse>
     </div>
   )
 }
@@ -275,28 +302,28 @@ function FolderTree({ parent, depth, folders, notes, route, onPick }: {
               draggable onDragStart={(e) => e.dataTransfer.setData(DRAG_F, f.id)}
               onDragOver={(e) => { allowDrop(e); allowFolderDrop(e) }}
               onDrop={(e) => { if (e.dataTransfer.types.includes(DRAG_F)) onDropFolder(e, f.id, folders); else onDropNote(e, f.id) }}>
-              <button className={cls('chev', isOpen && 'open', !hasKids && 'hide')} onClick={() => toggle(f.id)} aria-label="펼치기"><ChevronRight size={14} /></button>
+              <button className={cls('chev', isOpen && 'open', !hasKids && 'hide')} onClick={() => toggle(f.id)} aria-label={t('펼치기')}><ChevronRight size={14} /></button>
               <a href={'#/f/' + f.id} onClick={onPick}><FolderIcon size={16} strokeWidth={1.6} /><span>{f.name}</span></a>
               <span className="count">{notes.filter((n) => n.folderId === f.id).length || ''}</span>
-              <Menu align="end" trigger={<IB label="폴더 메뉴" className="row-more"><MoreVertical size={14} /></IB>}>
-                <Item icon={<FolderPlus size={15} />} onSelect={() => newFolder(f.id)}>하위 폴더 만들기</Item>
-                <Item icon={<Pencil size={15} />} onSelect={async () => { const n = await promptText('폴더 이름', f.name); if (n) updateFolder(f.id, { name: n }) }}>이름 변경</Item>
+              <Menu align="end" trigger={<IB label={t('폴더 메뉴')} className="row-more"><MoreVertical size={14} /></IB>}>
+                <Item icon={<FolderPlus size={15} />} onSelect={() => newFolder(f.id)}>{t('하위 폴더 만들기')}</Item>
+                <Item icon={<Pencil size={15} />} onSelect={async () => { const n = await promptText(t('폴더 이름'), f.name); if (n) updateFolder(f.id, { name: n }) }}>{t('이름 변경')}</Item>
                 <Item icon={<FolderInput size={15} />} onSelect={async () => {
-                  const to = await pickFolder('이동할 위치', f.id)
+                  const to = await pickFolder(t('이동할 위치'), f.id)
                   if (to === undefined) return
                   // 자기 하위 폴더 안으로는 옮길 수 없다
                   for (let p = to; p; p = folders.find((x) => x.id === p)?.parentId ?? null) if (p === f.id) return
                   updateFolder(f.id, { parentId: to })
-                }}>이동</Item>
+                }}>{t('이동')}</Item>
                 <MenuSep />
                 <Item icon={<Trash2 size={15} />} danger onSelect={async () => {
-                  if (!(await confirmDanger(`'${f.name}' 폴더를 삭제할까요?`, '하위 폴더도 함께 삭제되고, 안의 노트는 휴지통으로 이동합니다.'))) return
+                  if (!(await confirmDanger(t("'{{name}}' 폴더를 삭제할까요?", { name: f.name }), t('하위 폴더도 함께 삭제되고, 안의 노트는 휴지통으로 이동합니다.')))) return
                   await deleteFolder(f.id)
                   if (route.name === 'folder') go('#/')
-                }}>삭제</Item>
+                }}>{t('삭제')}</Item>
               </Menu>
             </div>
-            {hasKids && isOpen && <FolderTree parent={f.id} depth={depth + 1} folders={folders} notes={notes} route={route} onPick={onPick} />}
+            {hasKids && <Collapse open={isOpen}><FolderTree parent={f.id} depth={depth + 1} folders={folders} notes={notes} route={route} onPick={onPick} /></Collapse>}
           </div>
         )
       })}

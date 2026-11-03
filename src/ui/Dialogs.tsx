@@ -5,6 +5,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { Folder as FolderIcon, Home, Layers } from 'lucide-react'
 import { db } from '../lib/db'
 import { cls } from './kit'
+import { t } from '../lib/i18n'
 
 type D =
   | { kind: 'prompt'; title: string; value: string; ok: string; resolve: (v: string | null) => void }
@@ -14,9 +15,9 @@ type D =
 const useDialog = create<{ d: D | null }>(() => ({ d: null }))
 const open = (d: D) => useDialog.setState({ d })
 
-export const promptText = (title: string, value = '', ok = '확인') =>
+export const promptText = (title: string, value = '', ok = t('확인')) =>
   new Promise<string | null>((resolve) => open({ kind: 'prompt', title, value, ok, resolve }))
-export const confirmDanger = (title: string, message?: string, ok = '삭제') =>
+export const confirmDanger = (title: string, message?: string, ok = t('삭제')) =>
   new Promise<boolean>((resolve) => open({ kind: 'confirm', title, message, ok, resolve }))
 /** undefined = 취소, null = 최상위. forNote: 노트를 옮길 때 (그룹은 고를 수 없음) */
 export const pickFolder = (title: string, exclude?: string, forNote = false) =>
@@ -48,7 +49,7 @@ export function DialogHost() {
         <>
           {d.message && <p className="dialog-msg">{d.message}</p>}
           <div className="dialog-actions">
-            <button className="btn" onClick={() => close(false)}>취소</button>
+            <button className="btn" onClick={() => close(false)}>{t('취소')}</button>
             <button className="btn danger" autoFocus onClick={() => close(true)}>{d.ok}</button>
           </div>
         </>
@@ -64,7 +65,7 @@ function PromptBody({ d, close }: { d: Extract<D, { kind: 'prompt' }>; close: (v
     <form onSubmit={(e) => { e.preventDefault(); close(v.trim() || null) }}>
       <input className="field" autoFocus value={v} onChange={(e) => setV(e.target.value)} onFocus={(e) => e.target.select()} />
       <div className="dialog-actions">
-        <button type="button" className="btn" onClick={() => close(null)}>취소</button>
+        <button type="button" className="btn" onClick={() => close(null)}>{t('취소')}</button>
         <button type="submit" className="btn primary">{d.ok}</button>
       </div>
     </form>
@@ -84,7 +85,7 @@ function FolderBody({ exclude, forNote, close }: { exclude?: string; forNote?: b
   walk(null, 0)
   return (
     <div className="folder-pick">
-      <button className="tree-row" onClick={() => close(null)}><Home size={16} /> <span>최상위</span></button>
+      <button className="tree-row" onClick={() => close(null)}><Home size={16} /> <span>{t('최상위')}</span></button>
       {rows.map((r) => (
         <button key={r.id} className="tree-row" style={{ paddingLeft: 12 + r.depth * 16 }} disabled={forNote && !!r.group} onClick={() => close(r.id)}>
           {r.group ? <Layers size={16} /> : <FolderIcon size={16} />} <span>{r.name}</span>

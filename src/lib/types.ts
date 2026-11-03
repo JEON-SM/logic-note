@@ -70,6 +70,8 @@ export interface Folder {
 export interface Paper {
   size: 'a4'
   landscape?: boolean
+  /** 다음 페이지를 옆에 (없으면 아래에) */
+  side?: boolean
   /** 페이지 순서 (id는 순서를 바꿀 때 구분용) */
   pages: string[]
 }
@@ -82,6 +84,8 @@ export interface Note {
   edges: LogicEdge[]
   viewport?: Viewport
   bg?: Bg
+  /** 바탕색. 없으면 라이트/다크에 따라 흰색/검정 */
+  ground?: string | null
   /** 있으면 A4 용지 노트, 없으면 무한 캔버스 */
   paper?: Paper | null
   /** 이 노트만의 기본 모양. 없으면 전체 설정을 따른다 */

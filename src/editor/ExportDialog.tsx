@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useReactFlow } from '@xyflow/react'
 import { create } from 'zustand'
-import { CANVAS } from '../lib/color'
 import { captureImage, download, fileName, noteChars, toDotCode, toMermaid, toOutline } from '../lib/exporter'
-import { useTheme } from '../lib/store'
+
 import { Modal } from '../ui/Dialogs'
 import { cls } from '../ui/kit'
-import { useEd } from './store'
+import { useEd, useLook } from './store'
+import { t } from '../lib/i18n'
 
 const useExport = create<{ open: boolean }>(() => ({ open: false }))
 export const openExport = () => useExport.setState({ open: true })
@@ -14,20 +14,20 @@ export const openExport = () => useExport.setState({ open: true })
 type Code = 'outline' | 'mermaid' | 'dot'
 const CODES: Record<Code, { label: string; ext: string; help: string }> = {
   outline: {
-    label: 'AI용 개요', ext: 'txt',
-    help: '연결을 따라 펼친 흐름과 상자마다의 설명을 글로 정리합니다. Claude·ChatGPT에 붙여넣고 질문하면 노트의 논리를 가장 정확하게 읽어요.',
+    label: t('AI용 개요'), ext: 'txt',
+    help: t('연결을 따라 펼친 흐름과 상자마다의 설명을 글로 정리합니다. Claude·ChatGPT에 붙여넣고 질문하면 노트의 논리를 가장 정확하게 읽어요.'),
   },
   mermaid: {
     label: 'Mermaid', ext: 'mmd',
-    help: 'AI가 고쳐서 돌려준 코드를 다시 가져올 수 있고, Notion·GitHub·Obsidian에서는 그림으로 보입니다. 상자 제목은 굵게(<b>) 표시돼요.',
+    help: t('AI가 고쳐서 돌려준 코드를 다시 가져올 수 있고, Notion·GitHub·Obsidian에서는 그림으로 보입니다. 상자 제목은 굵게(<b>) 표시돼요.'),
   },
-  dot: { label: 'Graphviz', ext: 'dot', help: 'Graphviz 도구에서 열거나 Logic Note로 다시 가져올 수 있어요. 상자 제목은 굵게(<B>) 표시돼요.' },
+  dot: { label: 'Graphviz', ext: 'dot', help: t('Graphviz 도구에서 열거나 Logic Note로 다시 가져올 수 있어요. 상자 제목은 굵게(<B>) 표시돼요.') },
 }
 
 export function ExportDialog() {
   const open = useExport((s) => s.open)
   const rf = useReactFlow()
-  const theme = useTheme()
+  const look = useLook()
   const [code, setCode] = useState<Code>('outline')
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
@@ -59,29 +59,29 @@ export function ExportDialog() {
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
     const viewport = document.querySelector<HTMLElement>('.react-flow__viewport')!
     const { nodes, edges } = useEd.getState()
-    return captureImage(viewport, rf.getNodesBounds(rf.getNodes()), format, CANVAS[theme], noteChars(nodes, edges))
+    return captureImage(viewport, rf.getNodesBounds(rf.getNodes()), format, look.ground, noteChars(nodes, edges))
   }
   const run = (label: string, fn: () => Promise<unknown>) => async () => {
     setBusy(true)
     setMsg('')
-    try { await fn(); setMsg(label) } catch (e) { setMsg('실패: ' + (e as Error).message) } finally { setBusy(false) }
+    try { await fn(); setMsg(label) } catch (e) { setMsg(t('실패: ') + (e as Error).message) } finally { setBusy(false) }
   }
 
   return (
-    <Modal open onClose={close} title="내보내기" wide>
+    <Modal open onClose={close} title={t('내보내기')} wide>
       <section className="set-sec">
-        <h3>그림</h3>
+        <h3>{t('그림')}</h3>
         <div className="set-actions">
-          <button className="btn" disabled={busy || empty} onClick={run('PNG로 저장했어요', async () => download(await image('png'), fileName(title, 'png')))}>PNG 저장</button>
-          <button className="btn" disabled={busy || empty} onClick={run('그림을 복사했어요. 원하는 곳에 붙여넣으세요', async () => {
+          <button className="btn" disabled={busy || empty} onClick={run(t('PNG로 저장했어요'), async () => download(await image('png'), fileName(title, 'png')))}>{t('PNG 저장')}</button>
+          <button className="btn" disabled={busy || empty} onClick={run(t('그림을 복사했어요. 원하는 곳에 붙여넣으세요'), async () => {
             await navigator.clipboard.write([new ClipboardItem({ 'image/png': image('png') })])
-          })}>그림 복사</button>
-          <button className="btn" disabled={busy || empty} onClick={run('SVG로 저장했어요', async () => download(await image('svg'), fileName(title, 'svg')))}>SVG 저장</button>
-          <span className="set-status">{busy ? '만드는 중…' : ''}</span>
+          })}>{t('그림 복사')}</button>
+          <button className="btn" disabled={busy || empty} onClick={run(t('SVG로 저장했어요'), async () => download(await image('svg'), fileName(title, 'svg')))}>{t('SVG 저장')}</button>
+          <span className="set-status">{busy ? t('만드는 중…') : ''}</span>
         </div>
       </section>
       <section className="set-sec">
-        <h3>글·코드</h3>
+        <h3>{t('글·코드')}</h3>
         <div className="seg exp-seg">
           {(Object.keys(CODES) as Code[]).map((c) => (
             <button key={c} type="button" className={cls(code === c && 'on')} onClick={() => setCode(c)}>{CODES[c].label}</button>
@@ -90,12 +90,12 @@ export function ExportDialog() {
         <p className="set-help">{CODES[code].help}</p>
         <textarea className={cls('field imp-code', code === 'outline' && 'exp-prose')} readOnly value={text} onFocus={(e) => e.target.select()} />
         <div className="set-actions">
-          <button className="btn primary" disabled={!text} onClick={run('복사했어요', () => navigator.clipboard.writeText(text))}>복사</button>
-          <button className="btn" disabled={!text} onClick={run('파일로 저장했어요', async () =>
-            download(new Blob([text], { type: 'text/plain;charset=utf-8' }), fileName(title, CODES[code].ext)))}>파일로 저장</button>
+          <button className="btn primary" disabled={!text} onClick={run(t('복사했어요'), () => navigator.clipboard.writeText(text))}>{t('복사')}</button>
+          <button className="btn" disabled={!text} onClick={run(t('파일로 저장했어요'), async () =>
+            download(new Blob([text], { type: 'text/plain;charset=utf-8' }), fileName(title, CODES[code].ext)))}>{t('파일로 저장')}</button>
         </div>
       </section>
-      {msg && <p className={msg.startsWith('실패') ? 'set-error' : 'exp-msg'}>{msg}</p>}
+      {msg && <p className={msg.startsWith(t('실패')) ? 'set-error' : 'exp-msg'}>{msg}</p>}
     </Modal>
   )
 }

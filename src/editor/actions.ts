@@ -6,6 +6,7 @@ import { looksLikeMarkdown, markdownToHtml } from '../lib/rich'
 import type { MediaItem } from '../lib/types'
 import { openImport } from '../ui/ImportDialog'
 import { addBox, addLink, commit, patchNodes, selectedNodes, startEditing, useEd } from './store'
+import { t } from '../lib/i18n'
 
 let centerFn: () => XYPosition = () => ({ x: 0, y: 0 })
 export const setCenterFn = (f: () => XYPosition) => { centerFn = f }
@@ -32,7 +33,7 @@ export async function insertFiles(files: File[], at?: XYPosition) {
 }
 
 export async function insertLink(url?: string, at?: XYPosition) {
-  const u = url ?? (await promptText('링크 추가', 'https://', '추가'))
+  const u = url ?? (await promptText(t('링크 추가'), 'https://', t('추가')))
   if (!u || !isUrl(u)) return
   const html = `<p><a href="${esc(u.trim())}">${esc(u.trim())}</a></p>`
   const target = !at && single()

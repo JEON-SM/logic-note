@@ -459,9 +459,9 @@ mark.hl { background: var(--hl); color: inherit; border-radius: 2px; padding: 0 
 
 /* 알림 */
 .toast {
-  position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom)); z-index: 60; transform: translateX(-50%);
+  position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom)); z-index: 60;
   padding: 8px 14px; border-radius: 10px; background: var(--text); color: var(--bg); font-size: 13px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18); pointer-events: none; animation: toast-in 0.18s ease;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18); pointer-events: none;
 }
 @keyframes toast-in { from { opacity: 0; transform: translate(-50%, 6px); } }
 
@@ -483,3 +483,51 @@ mark.hl { background: var(--hl); color: inherit; border-radius: 2px; padding: 0 
 .exp-seg { margin-bottom: 10px; }
 .imp-code.exp-prose { height: 220px; font-family: inherit; font-size: 13px; }
 .exp-msg { margin: 4px 0 0; font-size: 12px; color: var(--text-2); }
+
+/* 배경 고르기 */
+.bg-pop { width: 252px; }
+.bg-pop .cpanel { padding: 0; }
+.bg-list { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin: 6px 0 4px; }
+.bg-list button { height: 30px; border: 1px solid var(--line); border-radius: 7px; background: transparent; color: var(--text); font-size: 12px; }
+.bg-list button:hover { background: var(--hover); }
+.bg-list button.on { border-color: var(--text); font-weight: 600; }
+.bg-pop .cp-adv { display: inline-flex; align-items: center; gap: 4px; }
+
+/* ── 움직임: 짧고 부드럽게 (삼성 노트처럼 빠르게 나와 천천히 멈춤) ── */
+:root { --ease: cubic-bezier(0.22, 1, 0.36, 1); }
+.route { height: 100%; }
+.tb-group { display: flex; align-items: center; gap: 2px; }
+.ib, .btn, .seg button, .page-add, .page-ind-n, .zoom-val, .bg-list button, .size-list button { transition: transform 0.14s var(--ease), background 0.12s, color 0.12s, border-color 0.12s; }
+.ib:active:not(:disabled), .btn:active:not(:disabled), .seg button:active, .page-add:active, .page-ind-n:active, .bg-list button:active, .size-list button:active { transform: scale(0.92); }
+.fab { transition: transform 0.18s var(--ease), box-shadow 0.18s; }
+.fab:active { transform: scale(0.9); }
+.menu, .pop { transform-origin: var(--radix-dropdown-menu-content-transform-origin, var(--radix-popover-content-transform-origin, var(--radix-context-menu-content-transform-origin, top left))); }
+.menu[data-state='open'], .pop[data-state='open'] { animation: pop-in 0.18s var(--ease); }
+.menu[data-state='closed'], .pop[data-state='closed'] { animation: pop-out 0.1s ease-in forwards; }
+@keyframes pop-in { from { opacity: 0; transform: scale(0.94); } }
+@keyframes pop-out { to { opacity: 0; transform: scale(0.97); } }
+.overlay[data-state='open'] { animation: fade 0.2s; }
+.overlay[data-state='closed'] { animation: fade-out 0.15s forwards; }
+.dialog[data-state='open'] { animation: dialog-in 0.26s var(--ease); }
+.dialog[data-state='closed'] { animation: dialog-out 0.14s ease-in forwards; }
+@keyframes dialog-in { from { opacity: 0; transform: translate(-50%, -46%) scale(0.96); } }
+@keyframes dialog-out { to { opacity: 0; transform: translate(-50%, -48%) scale(0.98); } }
+@keyframes fade-out { to { opacity: 0; } }
+.chev { transition: transform 0.22s var(--ease); }
+.card .thumb { transition: border-color 0.15s, box-shadow 0.2s, transform 0.2s var(--ease); }
+.card:hover .thumb { transform: translateY(-2px); }
+.card:active .thumb { transform: scale(0.98); }
+.box-halo { animation: fade-in 0.15s; }
+.empty-note, .empty { animation: rise 0.4s var(--ease); }
+@keyframes rise { from { opacity: 0; transform: translate(var(--rx, 0), 8px); } }
+.empty-note { --rx: -50%; }
+.pick-bar, .page-ind { animation: rise 0.3s var(--ease); }
+.pick-bar, .page-ind { --rx: -50%; }
+.page-ind-n { display: inline-flex; align-items: center; justify-content: center; gap: 3px; overflow: hidden; }
+.page-ind-cur { display: inline-block; min-width: 1ch; }
+.page-card .page-thumb { transition: box-shadow 0.2s, transform 0.2s var(--ease); }
+.page-card:hover .page-thumb { transform: translateY(-2px); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08); }
+.tree-row, .side-link, .menu-item { transition: background 0.12s, color 0.12s; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}

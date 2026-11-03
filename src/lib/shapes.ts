@@ -1,18 +1,19 @@
 import type { BoxData, Defaults, EdgeData, Rel, Shape } from './types'
+import { t } from '../lib/i18n'
 
 export const SHAPES: { id: Shape; label: string }[] = [
-  { id: 'rect', label: '사각형' },
-  { id: 'round', label: '둥근 사각형' },
-  { id: 'ellipse', label: '원' },
-  { id: 'diamond', label: '마름모' },
-  { id: 'para', label: '평행사변형' },
-  { id: 'hex', label: '육각형' },
+  { id: 'rect', label: t('사각형') },
+  { id: 'round', label: t('둥근 사각형') },
+  { id: 'ellipse', label: t('원') },
+  { id: 'diamond', label: t('마름모') },
+  { id: 'para', label: t('평행사변형') },
+  { id: 'hex', label: t('육각형') },
 ]
 
 /** 메모지: 접힌 모서리가 있는 종이. 글은 왼쪽 위부터 */
 export const MEMOS: { id: Shape; label: string }[] = [
-  { id: 'memo', label: '메모지' },
-  { id: 'memo-lined', label: '줄 메모지' },
+  { id: 'memo', label: t('메모지') },
+  { id: 'memo-lined', label: t('줄 메모지') },
 ]
 export const isMemo = (s: Shape) => s === 'memo' || s === 'memo-lined'
 export const MEMO = { w: 200, h: 200, fill: '#FFF4C2', pad: 14, line: 24, fold: 18 }
@@ -73,7 +74,7 @@ export const BASE_DEFAULTS: Defaults = {
 }
 
 export const RELS: { id: Rel; label: string }[] = [
-  { id: '=', label: '같음' },
-  { id: '≠', label: '같지 않음' },
-  { id: '≈', label: '비슷함' },
+  { id: '=', label: t('같음') },
+  { id: '≠', label: t('같지 않음') },
+  { id: '≈', label: t('비슷함') },
 ]
