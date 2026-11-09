@@ -4,6 +4,7 @@
 import { colorName } from './color'
 import { hierarchy } from './sets'
 import type { EdgeAttributesObject, NodeAttributesObject, SubgraphAttributesObject } from 'ts-graphviz'
+import { handleSide } from './shapes'
 import type { BoxNode, EdgeData, LogicEdge, Shape } from './types'
 import { t } from '../lib/i18n'
 
@@ -38,8 +39,8 @@ const firstColor = (html: string) => html.match(/data-tc="(#[0-9A-Fa-f]{6})"/)?.
 const edgeText = (d: EdgeData) => [d.rel, d.label].filter(Boolean).join(' ')
 
 /** 연결선이 주로 좌우로 이어지면 LR, 아니면 위→아래 */
-const direction = (edges: LogicEdge[]) => {
-  const side = edges.filter((e) => e.sourceHandle === 'r' || e.sourceHandle === 'l').length
+const direction = (nodes: BoxNode[], edges: LogicEdge[]) => {
+  const side = edges.filter((e) => ['r', 'l'].includes(handleSide(nodes.find((n) => n.id === e.source)?.data, e.sourceHandle) ?? '')).length
   return side > edges.length / 2 ? 'LR' : 'TD'
 }
 
@@ -60,7 +61,7 @@ export function toMermaid(nodes: BoxNode[], edges: LogicEdge[]): string {
   const id = new Map(nodes.map((n, i) => [n.id, 'n' + (i + 1)]))
   const byId = new Map(nodes.map((n) => [n.id, n]))
   const { kids, parentOf } = hierarchy(nodes)
-  const out = [`flowchart ${direction(edges)}`]
+  const out = [`flowchart ${direction(nodes, edges)}`]
   // 집합(안에 상자가 있는 상자)은 subgraph로
   const emit = (n: BoxNode, pad: string) => {
     const cs = kids.get(n.id)
@@ -116,7 +117,7 @@ export async function toDotCode(nodes: BoxNode[], edges: LogicEdge[]): Promise<s
   const { Digraph, toDot } = await import('ts-graphviz')
   type Parent = Pick<InstanceType<typeof Digraph>, 'createNode' | 'createSubgraph'>
   const g = new Digraph()
-  g.set('rankdir', direction(edges) === 'LR' ? 'LR' : 'TB')
+  g.set('rankdir', direction(nodes, edges) === 'LR' ? 'LR' : 'TB')
   g.attributes.node.set('fontname', 'Pretendard')
   g.attributes.edge.set('fontname', 'Pretendard')
   const name = new Map(nodes.map((n, i) => [n.id, 'n' + (i + 1)]))
@@ -172,7 +173,7 @@ const ARROW = { end: '→', both: '↔', none: '—' } as const
 export function toOutline(title: string, nodes: BoxNode[], edges: LogicEdge[]): string {
   const byId = new Map(nodes.map((n) => [n.id, n]))
   const linked = edges.filter((e) => byId.has(e.source) && byId.has(e.target))
-  const lr = direction(linked) === 'LR'
+  const lr = direction(nodes, linked) === 'LR'
   // 흐름 방향으로 먼저, 같은 줄(40px 안)이면 옆으로 읽는 순서
   const pos = (n: BoxNode) => (lr ? [Math.round(n.position.x / 40), n.position.y] : [Math.round(n.position.y / 40), n.position.x])
   const order = (a: BoxNode, b: BoxNode) => { const [a1, a2] = pos(a), [b1, b2] = pos(b); return a1 - b1 || a2 - b2 }

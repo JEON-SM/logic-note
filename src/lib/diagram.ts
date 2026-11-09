@@ -5,7 +5,7 @@ import type { MermaidConfig } from 'mermaid'
 import { textVars } from './color'
 import { plain, uid } from './db'
 import { lang, t } from './i18n'
-import { defaultBox, defaultEdge, outerSize } from './shapes'
+import { attachPorts, defaultBox, defaultEdge, outerSize } from './shapes'
 import type { BoxNode, EdgeData, LogicEdge, Rel, Shape } from './types'
 
 type Dir = 'TB' | 'BT' | 'LR' | 'RL'
@@ -402,7 +402,7 @@ export async function parseDiagram(text: string, kind: EdgeData['kind'] = 'bezie
     throw new Error(msg.startsWith("'") ? msg : t('코드를 읽지 못했어요: {{msg}}', { msg: msg.split('\n')[0].slice(0, 160) }))
   }
   if (!gr.nodes.length) throw new Error(t('도식에 상자가 없어요.'))
-  const { nodes, edges } = await layout(gr, kind)
+  const laid = await layout(gr, kind), { nodes, edges } = attachPorts(laid.nodes, laid.edges)
   const title = gr.title || plain(nodes[0].data.title) || t('가져온 도식')
   return { title, nodes, edges, source: k === 'dot' ? 'Graphviz' : 'Mermaid' }
 }

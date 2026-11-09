@@ -90,6 +90,8 @@ export interface Note {
   bg?: Bg
   /** 바탕색. 없으면 라이트/다크에 따라 흰색/검정 */
   ground?: string | null
+  /** 선 끝에 연결점을 달아 둔 노트 (예전 노트는 처음 열 때 한 번 달아 준다) */
+  dots?: number
   /** 이 노트만의 다크 모드. 없으면 앱 테마를 따른다 */
   mode?: 'light' | 'dark' | null
   /** 있으면 A4 용지 노트, 없으면 무한 캔버스 */

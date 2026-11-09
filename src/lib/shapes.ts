@@ -1,4 +1,4 @@
-import type { BoxData, Defaults, EdgeData, Rel, Shape } from './types'
+import type { BoxData, BoxNode, Defaults, EdgeData, LogicEdge, Port, Rel, Shape } from './types'
 import { t } from '../lib/i18n'
 
 export const SHAPES: { id: Shape; label: string }[] = [
@@ -89,6 +89,37 @@ export function shapeAnchors(s: Shape, w: number, h: number) {
 export function portSide(u: number, v: number): 't' | 'r' | 'b' | 'l' {
   const d = [['t', v], ['r', 1 - u], ['b', 1 - v], ['l', u]] as const
   return d.reduce((a, b) => (b[1] < a[1] ? b : a))[0]
+}
+
+/** 선 끝이 상자의 어느 변을 향하는지 (연결점이면 가장 가까운 변) */
+export const handleSide = (d: BoxData | undefined, h?: string | null) => {
+  const p = d?.ports?.find((x) => x.id === h)
+  return p ? portSide(p.u, p.v) : h
+}
+
+const SIDE_AT: Record<string, [number, number]> = { t: [0.5, 0], r: [1, 0.5], b: [0.5, 1], l: [0, 0.5] }
+/**
+ * 네 변 가운데의 보이지 않는 점에 붙은 선 끝마다 그 자리에 연결점을 만들어 옮겨 단다.
+ * 위치는 그대로라 선 모양은 바뀌지 않는다.
+ */
+export function attachPorts(nodes: BoxNode[], edges: LogicEdge[]) {
+  const byId = new Map(nodes.map((n) => [n.id, n]))
+  const made = new Map<string, Port[]>()
+  const portFor = (id: string, h: string | null | undefined) => {
+    const at = h ? SIDE_AT[h] : undefined, n = byId.get(id)
+    if (!at || !n) return h
+    const list = made.get(id) ?? n.data.ports ?? []
+    const same = list.find((p) => Math.hypot(p.u - at[0], p.v - at[1]) < 0.02)
+    if (same) return same.id
+    const port = { id: 'p' + h, u: at[0], v: at[1] }
+    made.set(id, [...list, port])
+    return port.id
+  }
+  const out = edges.map((e) => {
+    const sourceHandle = portFor(e.source, e.sourceHandle), targetHandle = portFor(e.target, e.targetHandle)
+    return sourceHandle === e.sourceHandle && targetHandle === e.targetHandle ? e : { ...e, sourceHandle, targetHandle }
+  })
+  return { nodes: made.size ? nodes.map((n) => (made.has(n.id) ? { ...n, data: { ...n.data, ports: made.get(n.id) } } : n)) : nodes, edges: out }
 }
 
 export const defaultBox = (shape: Shape): BoxData => ({

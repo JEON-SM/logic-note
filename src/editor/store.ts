@@ -7,7 +7,7 @@ import { uid, updateNote } from '../lib/db'
 import { fitToPaper, newPaper, nodesByPage, pageAt, pageOrigin, pageSize, pagesSize, paperKind, relocate, type PaperKind } from '../lib/pages'
 import { applyToHtml, type Fmt } from '../lib/rich'
 import { boxAt, hierarchy, layoutSets, rectOf, type Frame, type Rect } from '../lib/sets'
-import { MEMO, defaultBox, defaultEdge, isMemo, portSide } from '../lib/shapes'
+import { MEMO, attachPorts, defaultBox, defaultEdge, isMemo, portSide } from '../lib/shapes'
 import { noteLook, type Theme } from '../lib/color'
 import { useSettings, useTheme } from '../lib/store'
 import type { Bg, BoxData, BoxNode, Defaults, EdgeData, LogicEdge, Note, Paper, Shape } from '../lib/types'
@@ -85,8 +85,9 @@ useSettings.subscribe((s, p) => { if (s.defaults !== p.defaults && !get().defaul
 let loading = false
 export function loadNote(n: Note) {
   loading = true
+  const { nodes, edges } = n.dots ? n : attachPorts(n.nodes, n.edges)
   set({
-    noteId: n.id, title: n.title, bg: n.bg ?? 'grid', ground: n.ground ?? null, mode: n.mode ?? null, paper: n.paper ?? null, defaults: n.defaults ?? null, nodes: n.nodes, edges: n.edges, frames: {},
+    noteId: n.id, title: n.title, bg: n.bg ?? 'grid', ground: n.ground ?? null, mode: n.mode ?? null, paper: n.paper ?? null, defaults: n.defaults ?? null, nodes, edges, frames: {},
     editingId: null, editingEdge: null, dropTarget: null, picking: null, resizing: null, portDraft: null, past: [], future: [], rev: 0, tool: 'hand',
   })
   applyDefaults()
@@ -100,7 +101,7 @@ export function flushSave() {
   clearTimeout(timer)
   timer = undefined
   const { noteId, title, bg, ground, mode, defaults } = get()
-  if (noteId) updateNote(noteId, { title, bg, ground, mode, defaults, ...snap() })
+  if (noteId) updateNote(noteId, { title, bg, ground, mode, defaults, dots: 1, ...snap() })
 }
 useEd.subscribe((s, p) => {
   if (!loading && s.noteId && s.noteId === p.noteId && (s.rev !== p.rev || s.title !== p.title || s.bg !== p.bg || s.ground !== p.ground || s.mode !== p.mode || s.defaults !== p.defaults || s.paper !== p.paper)) {
@@ -217,7 +218,11 @@ export function addLink(source: string, sourceHandle: string, target: string, ta
   if (source === target) return
   if (record) commit()
   const edge: LogicEdge = { id: uid(), type: 'logic', source, sourceHandle, target, targetHandle, data: { ...get().edgeStyle } }
-  set((s) => ({ edges: [...s.edges, edge], rev: s.rev + 1 }))
+  // 새 선의 양 끝에도 연결점을 단다
+  set((s) => {
+    const r = attachPorts(s.nodes, [edge])
+    return { nodes: r.nodes, edges: [...s.edges, ...r.edges], rev: s.rev + 1 }
+  })
 }
 
 export function patchNodes(ids: string[], patch: Partial<BoxData> | ((d: BoxData) => Partial<BoxData>), record = true) {

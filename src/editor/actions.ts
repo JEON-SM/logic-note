@@ -5,6 +5,7 @@ import { looksLikeDiagram, parseDiagram, type Imported } from '../lib/diagram'
 import { looksLikeMarkdown, markdownToHtml } from '../lib/rich'
 import type { MediaItem } from '../lib/types'
 import { openImport } from '../ui/ImportDialog'
+import { handleSide } from '../lib/shapes'
 import { addBox, addLink, commit, patchNodes, selectedNodes, startEditing, useEd } from './store'
 import { t } from '../lib/i18n'
 
@@ -53,7 +54,7 @@ export function addChild() {
   const from = single()
   if (!from) return
   const w = from.measured?.width ?? 140
-  const siblings = useEd.getState().edges.filter((e) => e.source === from.id && e.sourceHandle === 'r').length
+  const siblings = useEd.getState().edges.filter((e) => e.source === from.id && handleSide(from.data, e.sourceHandle) === 'r').length
   const id = addBox({ x: from.position.x + w / 2 + 150, y: from.position.y + siblings * 90 }, from.data.shape, {
     fill: from.data.fill, stroke: from.data.stroke, strokeWidth: from.data.strokeWidth, dash: from.data.dash,
   })
