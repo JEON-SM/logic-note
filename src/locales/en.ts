@@ -20,6 +20,7 @@ const en: Record<string, string> = {
   '크기 자동 맞춤': 'Auto size',
   '라벨 쓰기': 'Write label',
   '연결점 삭제': 'Delete dot',
+  '점을 지웠어요': 'Dot deleted',
   '점 위치를 눌러 정하세요 (Esc 취소)': 'Click to place the dot (Esc to cancel)',
   '선 삭제': 'Delete line',
   '여기에 상자': 'Box here',

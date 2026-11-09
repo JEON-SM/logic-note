@@ -311,7 +311,7 @@ function Canvas({ id, viewport }: { id: string; viewport?: Viewport }) {
       <ReactFlow
         nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes}
         onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} onConnectEnd={onConnectEnd} onReconnect={onReconnect}
-        nodeOrigin={[0.5, 0.5]} connectionMode={ConnectionMode.Loose} connectionRadius={32}
+        nodeOrigin={[0.5, 0.5]} connectionMode={ConnectionMode.Loose} connectionRadius={32} connectOnClick={false}
         connectionLineType={edgeKind === 'straight' ? ConnectionLineType.Straight : edgeKind === 'step' ? ConnectionLineType.SmoothStep : ConnectionLineType.Bezier}
         defaultViewport={startView} fitView={fitOnOpen} fitViewOptions={{ padding: 0.25, maxZoom: 1 }}
         translateExtent={ps ? [[-ps.w * 1.5, -ps.h], [pagesSize(paper!).w + ps.w * 1.5, pagesSize(paper!).h + ps.h]] : undefined}
