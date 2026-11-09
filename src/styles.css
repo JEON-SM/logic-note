@@ -307,10 +307,9 @@ mark.hl { background: var(--hl); color: inherit; border-radius: 2px; padding: 0 
 }
 .react-flow__node:hover .h, .react-flow__node.selected .h, .react-flow.connecting .h { opacity: 1; }
 .react-flow__handle.h:hover { background: var(--accent); }
-/* 크기 손잡이 (React Flow NodeResizer) */
-.react-flow__resize-control.rs-h { width: 9px; height: 9px; border-radius: 2px; background: var(--panel); border: 1.5px solid var(--accent); }
+/* 크기 손잡이 (React Flow NodeResizer): 기능만 두고 보이지 않게. 선택 표시는 도형을 따라가는 .box-halo */
+.react-flow__resize-control.rs-h { width: 14px; height: 14px; background: transparent; border: 0; }
 .react-flow__resize-control.rs-l { border-color: transparent; }
-.react-flow__resize-control.rs-l:hover { border-color: rgba(255, 95, 31, 0.5); }
 
 /* 미디어 · 링크 */
 .media { display: flex; flex-direction: column; gap: 6px; }

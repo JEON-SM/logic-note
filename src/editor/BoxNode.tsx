@@ -85,7 +85,7 @@ export const BoxNode = memo(function BoxNode({ id, data, selected }: NodeProps<B
         patchNodes([id], { w: null, h: null, wrap: null })
       }}>
       <svg className="box-shape" width={w} height={h}>
-        {selected && <path data-f className="box-halo" d={d} fill="none" stroke={ACCENT} strokeOpacity={0.35} strokeWidth={sw + 5} strokeLinejoin="round" />}
+        {selected && <path data-f className="box-halo" d={d} fill="none" stroke={ACCENT} strokeWidth={sw + 4} strokeLinejoin="round" />}
         <path data-f className="box-main" d={d} fill={fill} stroke={data.dash === 'none' ? 'none' : stroke} strokeWidth={sw}
           strokeDasharray={data.dash === 'dashed' ? '6 4' : undefined} strokeLinejoin="round" />
         {data.shape === 'memo-lined' && (
@@ -107,7 +107,7 @@ export const BoxNode = memo(function BoxNode({ id, data, selected }: NodeProps<B
         {!data.hidePreview && <LinkCards html={data.body} />}
       </div>
       {solo && !editing && (
-        <NodeResizer minWidth={48} minHeight={frame ? 40 : Math.round(natural.h)} color={ACCENT} handleClassName="rs-h" lineClassName="rs-l"
+        <NodeResizer minWidth={48} minHeight={frame ? 40 : Math.round(natural.h)} handleClassName="rs-h" lineClassName="rs-l"
           onResizeStart={() => { commit(); useEd.setState({ resizing: id }) }} onResizeEnd={() => useEd.setState({ resizing: null })} />
       )}
       {SIDES.map((s) => <Handle key={s.id} id={s.id} type="source" position={s.pos} className="h" />)}
