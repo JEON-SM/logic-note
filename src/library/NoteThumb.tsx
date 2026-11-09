@@ -1,5 +1,5 @@
 import { memo } from 'react'
-import { INK, SURFACE, groundLook, themeMap, readable, type Theme } from '../lib/color'
+import { INK, SURFACE, noteLook, themeMap, readable, type Theme } from '../lib/color'
 import { plain } from '../lib/db'
 import { pageSize } from '../lib/pages'
 import { hierarchy, type Frame, type Rect } from '../lib/sets'
@@ -8,7 +8,7 @@ import type { BoxNode, LogicEdge, Note } from '../lib/types'
 
 /** 노트 데이터로 그린 미리보기 (스크린샷 없이 SVG로). 용지 노트는 첫 페이지를 보여 준다 */
 export const NoteThumb = memo(function NoteThumb({ note, theme: appTheme }: { note: Note; theme: Theme }) {
-  const { theme, ground } = groundLook(note.ground, appTheme)
+  const { theme, ground } = noteLook(note.ground, note.mode, appTheme)
   if (note.paper) {
     const { w, h } = pageSize(note.paper)
     return <Thumb nodes={note.nodes} edges={note.edges} theme={theme} ground={ground} area={{ x: 0, y: 0, w, h }} />

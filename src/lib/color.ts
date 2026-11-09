@@ -72,10 +72,21 @@ export type Look = { ground: string; theme: Theme; grid: string; custom: boolean
  * 노트 바탕: 정한 색(무채색은 다크 모드에서 반전) 또는 테마 기본색.
  * 그 위의 상자·선은 바탕이 밝은지 어두운지에 맞춰 그린다(theme).
  */
-export function groundLook(ground: string | null | undefined, theme: Theme): Look {
+export function groundLook(ground: string | null | undefined, theme: Theme, forced = false): Look {
   if (!ground) return { ground: CANVAS[theme], theme, grid: theme === 'dark' ? '#323236' : '#ECECEA', custom: false }
-  const g = themeMap(ground, theme), tone = toneOf(g)
+  let g = themeMap(ground, theme)
+  // 노트별 다크 모드를 정했으면 바탕 밝기를 거기에 맞춘다
+  if (forced && toneOf(g) !== theme) {
+    g = isAchromatic(g) ? invert(g) : mix(g, CANVAS[theme], 0.82)
+    if (toneOf(g) !== theme) g = CANVAS[theme]
+  }
+  const tone = toneOf(g)
   return { ground: g, theme: tone, grid: mix(g, tone === 'dark' ? '#FFFFFF' : '#000000', tone === 'dark' ? 0.12 : 0.075), custom: true }
+}
+/** 노트에 보이는 모양: 노트별 다크 모드(mode)가 있으면 앱 테마 대신 그것을 따른다 */
+export function noteLook(ground: string | null | undefined, mode: Theme | null | undefined, app: Theme): Look {
+  const l = groundLook(ground, mode ?? app, !!mode)
+  return mode && mode !== app ? { ...l, custom: true } : l
 }
 /** 캔버스 안(상자·선·종이)에서만 바꿔 쓸 CSS 변수 */
 export const groundVars = (l: Look) => (l.custom ? {

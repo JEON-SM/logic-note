@@ -294,11 +294,11 @@ a { color: inherit; text-decoration: none; }
 .tone-light [data-tc] { color: var(--tc-l); }
 .tone-dark [data-tc] { color: var(--tc-d); }
 mark.hl { background: var(--hl); color: inherit; border-radius: 2px; padding: 0 0.08em; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
-[data-theme='dark'] mark.hl { background: var(--hl-d); }
-[data-theme='light'] mark[data-tl='light'], [data-theme='dark'] mark[data-td='light'] { color: var(--tc-l, #1C1C1E); }
-[data-theme='light'] mark[data-tl='dark'], [data-theme='dark'] mark[data-td='dark'] { color: var(--tc-d, #F2F2F7); }
-[data-theme='light'] mark[data-tl='light'] [data-tc], [data-theme='dark'] mark[data-td='light'] [data-tc] { color: var(--tc-l); }
-[data-theme='light'] mark[data-tl='dark'] [data-tc], [data-theme='dark'] mark[data-td='dark'] [data-tc] { color: var(--tc-d); }
+.react-flow.dark mark.hl { background: var(--hl-d); }
+.react-flow.light mark[data-tl='light'], .react-flow.dark mark[data-td='light'] { color: var(--tc-l, #1C1C1E); }
+.react-flow.light mark[data-tl='dark'], .react-flow.dark mark[data-td='dark'] { color: var(--tc-d, #F2F2F7); }
+.react-flow.light mark[data-tl='light'] [data-tc], .react-flow.dark mark[data-td='light'] [data-tc] { color: var(--tc-l); }
+.react-flow.light mark[data-tl='dark'] [data-tc], .react-flow.dark mark[data-td='dark'] [data-tc] { color: var(--tc-d); }
 
 /* 연결점 */
 .react-flow__handle.h {
@@ -357,7 +357,7 @@ mark.hl { background: var(--hl); color: inherit; border-radius: 2px; padding: 0 
 .box.memo .box-title:not(:empty) + .box-body:not(:empty), .box.memo .editing .box-title + .box-body { margin-top: 0; }
 .box.memo .box-body { opacity: 0.9; }
 .box.memo .box-main { filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.08)) drop-shadow(0 6px 12px rgba(0, 0, 0, 0.08)); }
-[data-theme='dark'] .box.memo .box-main { filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.5)); }
+.react-flow.dark .box.memo .box-main { filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.5)); }
 
 /* 오른쪽 버튼으로 끌어 고르기 */
 .marquee { position: fixed; z-index: 20; pointer-events: none; background: rgba(255, 95, 31, 0.06); border: 1px dashed rgba(255, 95, 31, 0.7); border-radius: 4px; }
@@ -385,7 +385,7 @@ mark.hl { background: var(--hl); color: inherit; border-radius: 2px; padding: 0 
   position: absolute; left: 0; top: 0; background-color: var(--canvas);
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.04), 0 2px 4px rgba(0, 0, 0, 0.05), 0 10px 28px rgba(0, 0, 0, 0.07);
 }
-[data-theme='dark'] .page { box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 10px 28px rgba(0, 0, 0, 0.5); }
+.react-flow.dark .page { box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 10px 28px rgba(0, 0, 0, 0.5); }
 .page.bg-grid { background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px); background-size: 24px 24px; }
 .page.bg-grid-wide { background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px); background-size: 48px 48px; }
 .page.bg-dots { background-image: radial-gradient(circle, var(--line-2) 1.2px, transparent 1.5px); background-size: 24px 24px; }
@@ -529,6 +529,10 @@ mark.hl { background: var(--hl); color: inherit; border-radius: 2px; padding: 0 
 .page-card .page-thumb { transition: box-shadow 0.2s, transform 0.2s var(--ease); }
 .page-card:hover .page-thumb { transform: translateY(-2px); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08); }
 .tree-row, .side-link, .menu-item { transition: background 0.12s, color 0.12s; }
+/* 노트 다크 모드·바탕색을 바꿀 때 색이 부드럽게 넘어간다 */
+.react-flow__background, .page, .edge-label { transition: background-color 0.25s ease, color 0.25s ease; }
+.box-main { transition: fill 0.25s ease, stroke 0.25s ease; }
+.react-flow__edge-path { transition: stroke 0.25s ease; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }

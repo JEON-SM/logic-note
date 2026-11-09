@@ -86,6 +86,8 @@ export interface Note {
   bg?: Bg
   /** 바탕색. 없으면 라이트/다크에 따라 흰색/검정 */
   ground?: string | null
+  /** 이 노트만의 다크 모드. 없으면 앱 테마를 따른다 */
+  mode?: 'light' | 'dark' | null
   /** 있으면 A4 용지 노트, 없으면 무한 캔버스 */
   paper?: Paper | null
   /** 이 노트만의 기본 모양. 없으면 전체 설정을 따른다 */

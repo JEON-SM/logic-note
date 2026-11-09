@@ -8,7 +8,7 @@ import { fitToPaper, newPaper, nodesByPage, pageAt, pageOrigin, pageSize, pagesS
 import { applyToHtml, type Fmt } from '../lib/rich'
 import { boxAt, hierarchy, layoutSets, rectOf, type Frame, type Rect } from '../lib/sets'
 import { MEMO, defaultBox, defaultEdge, isMemo } from '../lib/shapes'
-import { groundLook } from '../lib/color'
+import { noteLook, type Theme } from '../lib/color'
 import { useSettings, useTheme } from '../lib/store'
 import type { Bg, BoxData, BoxNode, Defaults, EdgeData, LogicEdge, Note, Paper, Shape } from '../lib/types'
 
@@ -21,6 +21,8 @@ interface S {
   bg: Bg
   /** 바탕색 (null이면 테마 기본) */
   ground: string | null
+  /** 이 노트만의 다크 모드 (null이면 앱 테마) */
+  mode: Theme | null
   /** A4 용지 노트면 페이지 구성, 무한 캔버스면 null */
   paper: Paper | null
   /** 이 노트만의 기본 모양 (null이면 전체 설정) */
@@ -47,7 +49,7 @@ interface S {
 }
 
 export const useEd = create<S>(() => ({
-  noteId: '', title: '', bg: 'grid', ground: null, paper: null, defaults: null, nodes: [], edges: [], frames: {}, dropTarget: null, picking: null, resizing: null,
+  noteId: '', title: '', bg: 'grid', ground: null, mode: null, paper: null, defaults: null, nodes: [], edges: [], frames: {}, dropTarget: null, picking: null, resizing: null,
   editingId: null, editingEdge: null, active: null,
   tool: 'hand', shape: 'rect', edgeStyle: defaultEdge(), past: [], future: [], rev: 0,
 }))
@@ -60,8 +62,8 @@ const bump = () => get().rev + 1
 
 /** 이 노트 바탕과, 그 위 내용을 그릴 밝기(theme) */
 export function useLook() {
-  const theme = useTheme(), ground = useEd((s) => s.ground)
-  return useMemo(() => groundLook(ground, theme), [ground, theme])
+  const theme = useTheme(), ground = useEd((s) => s.ground), mode = useEd((s) => s.mode)
+  return useMemo(() => noteLook(ground, mode, theme), [ground, mode, theme])
 }
 
 // ── 기본 모양 ──
@@ -82,7 +84,7 @@ let loading = false
 export function loadNote(n: Note) {
   loading = true
   set({
-    noteId: n.id, title: n.title, bg: n.bg ?? 'grid', ground: n.ground ?? null, paper: n.paper ?? null, defaults: n.defaults ?? null, nodes: n.nodes, edges: n.edges, frames: {},
+    noteId: n.id, title: n.title, bg: n.bg ?? 'grid', ground: n.ground ?? null, mode: n.mode ?? null, paper: n.paper ?? null, defaults: n.defaults ?? null, nodes: n.nodes, edges: n.edges, frames: {},
     editingId: null, editingEdge: null, dropTarget: null, picking: null, resizing: null, past: [], future: [], rev: 0, tool: 'hand',
   })
   applyDefaults()
@@ -95,11 +97,11 @@ export function flushSave() {
   if (!timer) return
   clearTimeout(timer)
   timer = undefined
-  const { noteId, title, bg, ground, defaults } = get()
-  if (noteId) updateNote(noteId, { title, bg, ground, defaults, ...snap() })
+  const { noteId, title, bg, ground, mode, defaults } = get()
+  if (noteId) updateNote(noteId, { title, bg, ground, mode, defaults, ...snap() })
 }
 useEd.subscribe((s, p) => {
-  if (!loading && s.noteId && s.noteId === p.noteId && (s.rev !== p.rev || s.title !== p.title || s.bg !== p.bg || s.ground !== p.ground || s.defaults !== p.defaults || s.paper !== p.paper)) {
+  if (!loading && s.noteId && s.noteId === p.noteId && (s.rev !== p.rev || s.title !== p.title || s.bg !== p.bg || s.ground !== p.ground || s.mode !== p.mode || s.defaults !== p.defaults || s.paper !== p.paper)) {
     clearTimeout(timer)
     timer = setTimeout(flushSave, 600)
   }

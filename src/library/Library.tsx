@@ -15,7 +15,7 @@ import { Collapse, EASE, cls, IB, Item, Logo, Menu, MenuSep } from '../ui/kit'
 import { confirmDanger, pickFolder, promptText } from '../ui/Dialogs'
 import { openSettings, SyncButton } from '../ui/Settings'
 import { openImport } from '../ui/ImportDialog'
-import { groundLook } from '../lib/color'
+import { noteLook } from '../lib/color'
 import { paperOf } from '../lib/pages'
 import { NoteThumb } from './NoteThumb'
 import { locale, t } from '../lib/i18n'
@@ -174,7 +174,7 @@ const Rise = ({ i, children }: { i: number; children: React.ReactNode }) => (
 
 /** 카드 미리보기 바탕: 노트 바탕색과 그에 맞춘 무늬 색 (용지 노트는 책상 색) */
 const thumbStyle = (note: Note, theme: 'light' | 'dark') => {
-  const l = groundLook(note.ground, theme)
+  const l = noteLook(note.ground, note.mode, theme)
   return l.custom && !note.paper ? { backgroundColor: l.ground, ['--grid' as string]: l.grid } : undefined
 }
 

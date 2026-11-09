@@ -4,11 +4,11 @@ import {
   type Connection, type FinalConnectionState, type Viewport,
 } from '@xyflow/react'
 import { useShallow } from 'zustand/react/shallow'
-import { ArrowLeft, Check, Columns2, Files, Grid3x3, Import, Infinity as InfinityIcon, Maximize, Share, Minus, MoreVertical, Palette, Plus, RectangleHorizontal, RectangleVertical, Redo2, Trash2, Undo2 } from 'lucide-react'
-import { GROUNDS, groundVars } from '../lib/color'
+import { ArrowLeft, Check, Columns2, Files, Grid3x3, Import, Infinity as InfinityIcon, Maximize, Moon, Share, Minus, MoreVertical, Palette, Plus, RectangleHorizontal, RectangleVertical, Redo2, Sun, Trash2, Undo2 } from 'lucide-react'
+import { GROUNDS, groundLook, groundVars } from '../lib/color'
 import { db, freshNotes, purgeNote, updateNote } from '../lib/db'
 import { isUrl } from '../lib/media'
-import { go, setSettings } from '../lib/store'
+import { go, setSettings, useTheme } from '../lib/store'
 import { pageSize, pagesSize } from '../lib/pages'
 import { isMemo } from '../lib/shapes'
 import { remoteEvents } from '../lib/sync'
@@ -118,6 +118,7 @@ function TopBar({ id }: { id: string }) {
       <IB label={t('실행 취소 (Ctrl+Z)')} disabled={!canUndo} onClick={undo}><Undo2 size={18} strokeWidth={1.6} /></IB>
       <IB label={t('다시 실행 (Ctrl+Y)')} disabled={!canRedo} onClick={redo}><Redo2 size={18} strokeWidth={1.6} /></IB>
       {paper && <IB label={t('페이지 정렬')} onClick={openPages}><Files size={18} strokeWidth={1.6} /></IB>}
+      <NoteDark />
       <BgPop bg={bg} />
       <SyncButton />
       <Menu align="end" trigger={<IB label={t('더보기')}><MoreVertical size={18} strokeWidth={1.6} /></IB>}>
@@ -132,6 +133,20 @@ function TopBar({ id }: { id: string }) {
         <Item icon={<Trash2 size={15} />} danger onSelect={async () => { flushSave(); await updateNote(id, { trashed: 1 }); go('#/') }}>{t('노트 삭제')}</Item>
       </Menu>
     </header>
+  )
+}
+
+/** 이 노트만 다크 모드 켜기·끄기 (삼성 노트처럼 종이만 바뀐다). 저절로 그렇게 보이는 쪽으로 돌아오면 노트별 설정을 지운다 */
+function NoteDark() {
+  const app = useTheme(), dark = useLook().theme === 'dark'
+  const toggle = () => {
+    const next = dark ? 'light' : 'dark'
+    useEd.setState((s) => ({ mode: groundLook(s.ground, app).theme === next ? null : next }))
+  }
+  return (
+    <IB label={dark ? t('이 노트 다크 모드 끄기') : t('이 노트 다크 모드 켜기')} onClick={toggle}>
+      {dark ? <Sun size={18} strokeWidth={1.6} /> : <Moon size={18} strokeWidth={1.6} />}
+    </IB>
   )
 }
 

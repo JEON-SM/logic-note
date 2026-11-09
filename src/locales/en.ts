@@ -50,6 +50,8 @@ const en: Record<string, string> = {
   '노트 삭제': 'Delete note',
   '배경 (바탕색·무늬)': 'Background (color · pattern)',
   '바탕색': 'Background color',
+  '이 노트 다크 모드 켜기': 'Turn on dark mode for this note',
+  '이 노트 다크 모드 끄기': 'Turn off dark mode for this note',
   '기본 (흰색·검정)': 'Default (white · black)',
   '무늬': 'Pattern',
   '새 노트에 이 배경을 써요': 'New notes will use this background',
