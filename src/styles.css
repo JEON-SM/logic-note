@@ -312,6 +312,9 @@ mark.hl { background: var(--hl); color: inherit; border-radius: 2px; padding: 0 
 .port-dot { transition: transform 0.09s ease-out, r 0.09s ease-out; }
 .canvas.porting * { cursor: crosshair !important; }
 .react-flow__handle.h:hover { background: var(--accent); }
+/* 끌어서 옮기는 연결점 (크기를 바꾸면 선 끝이 어긋나므로 자석은 그림자로만 보인다) */
+.react-flow__handle.h.port.moving { opacity: 1; background: var(--accent); transition: box-shadow 0.09s ease-out; }
+.react-flow__handle.h.port.moving.snapped { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 35%, transparent); }
 /* 크기 손잡이 (React Flow NodeResizer): 기능만 두고 보이지 않게. 선택 표시는 도형을 따라가는 .box-halo */
 .react-flow__resize-control.rs-h { width: 14px; height: 14px; background: transparent; border: 0; }
 .react-flow__resize-control.rs-l { border-color: transparent; }

@@ -7,7 +7,7 @@ import { uid, updateNote } from '../lib/db'
 import { fitToPaper, newPaper, nodesByPage, pageAt, pageOrigin, pageSize, pagesSize, paperKind, relocate, type PaperKind } from '../lib/pages'
 import { applyToHtml, type Fmt } from '../lib/rich'
 import { boxAt, hierarchy, layoutSets, rectOf, type Frame, type Rect } from '../lib/sets'
-import { MEMO, attachPorts, defaultBox, defaultEdge, isMemo, portSide } from '../lib/shapes'
+import { MEMO, attachPorts, defaultBox, defaultEdge, isMemo } from '../lib/shapes'
 import { noteLook, type Theme } from '../lib/color'
 import { useSettings, useTheme } from '../lib/store'
 import type { Bg, BoxData, BoxNode, Defaults, EdgeData, LogicEdge, Note, Paper, Shape } from '../lib/types'
@@ -38,7 +38,8 @@ interface S {
   /** 손잡이로 크기를 바꾸고 있는 상자 (이때는 틀 움직임을 생략) */
   resizing: string | null
   /** 테두리에 놓으려는 연결점 (상자 안 좌표) */
-  portDraft: { id: string; x: number; y: number; snapped: boolean } | null
+  /** 놓거나 옮기는 중인 연결점 (port: 옮기는 점의 id) */
+  portDraft: { id: string; x: number; y: number; snapped: boolean; port?: string } | null
   editingId: string | null
   editingEdge: string | null
   active: Editor | null
@@ -440,18 +441,16 @@ export function addPort(id: string, u: number, v: number) {
   if (ports.some((p) => Math.hypot(p.u - u, p.v - v) < 0.02)) return
   patchNodes([id], { ports: [...ports, { id: uid(), u, v }] })
 }
-/** 연결점을 지운다. 거기 이어진 선은 가장 가까운 변의 가운데로 옮겨 남긴다 */
+/** 이 선이 그 연결점에 이어져 있는가 */
+export const atPort = (e: LogicEdge, id: string, port: string) =>
+  (e.source === id && e.sourceHandle === port) || (e.target === id && e.targetHandle === port)
+/** 연결점과 거기 이어진 선을 함께 지운다 */
 export function removePort(id: string, port: string) {
-  const p = get().nodes.find((n) => n.id === id)?.data.ports?.find((x) => x.id === port)
-  if (!p) return
-  const side = portSide(p.u, p.v)
-  patchNodes([id], (d) => ({ ports: (d.ports ?? []).filter((x) => x.id !== port) }))
+  commit()
   set((s) => ({
-    edges: s.edges.map((e) => ({
-      ...e,
-      ...(e.source === id && e.sourceHandle === port && { sourceHandle: side }),
-      ...(e.target === id && e.targetHandle === port && { targetHandle: side }),
-    })),
+    nodes: s.nodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, ports: (n.data.ports ?? []).filter((x) => x.id !== port) } } : n)),
+    edges: s.edges.filter((e) => !atPort(e, id, port)),
+    rev: s.rev + 1,
   }))
 }
 

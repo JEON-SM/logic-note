@@ -98,7 +98,7 @@ export const BoxNode = memo(function BoxNode({ id, data, selected }: NodeProps<B
         {draft && (
           <g>
             {shapeAnchors(data.shape, w, h).map((a, i) => <circle key={i} cx={a.x} cy={a.y} r={2.5} fill={ACCENT} opacity={0.5} />)}
-            <circle className="port-dot" r={draft.snapped ? 7 : 5} fill={ACCENT} stroke="#fff" strokeWidth={1.5} style={{ transform: `translate(${draft.x}px, ${draft.y}px)` }} />
+            {!draft.port && <circle className="port-dot" r={draft.snapped ? 7 : 5} fill={ACCENT} stroke="#fff" strokeWidth={1.5} style={{ transform: `translate(${draft.x}px, ${draft.y}px)` }} />}
           </g>
         )}
       </svg>
@@ -116,7 +116,8 @@ export const BoxNode = memo(function BoxNode({ id, data, selected }: NodeProps<B
       {/* 네 변 가운데의 점은 보이지 않는다: 기존 선과 '상자에 놓아 연결'에만 쓴다 */}
       {SIDES.map((s) => <Handle key={s.id} id={s.id} type="source" position={s.pos} className="h base" isConnectableStart={false} />)}
       {data.ports?.map((p) => (
-        <Handle key={p.id} id={p.id} type="source" position={SIDES.find((s) => s.id === portSide(p.u, p.v))!.pos} className="h port"
+        <Handle key={p.id} id={p.id} type="source" position={SIDES.find((s) => s.id === portSide(p.u, p.v))!.pos}
+          className={`h port${draft?.port === p.id ? ` moving${draft.snapped ? ' snapped' : ''}` : ''}`}
           style={{ left: `${p.u * 100}%`, top: `${p.v * 100}%`, right: 'auto', bottom: 'auto', transform: 'translate(-50%, -50%)' }} />
       ))}
     </div>

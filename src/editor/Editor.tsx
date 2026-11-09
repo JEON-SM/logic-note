@@ -25,7 +25,7 @@ import { Toolbar } from './Toolbar'
 import { ExportDialog, openExport } from './ExportDialog'
 import { PageIndicator, PageSorter, PagesLayer, openPages } from './Pages'
 import { usePageNav, usePageWheel, useSnapToPage } from './pageNav'
-import { usePortPlacing } from './ports'
+import { usePortMoving, usePortPlacing } from './ports'
 import {
   CLIP_MARK, addBox, addLink, canHold, commit, copySelection, cutSelection, dragOver, effDefaults, finishDrag, flushSave, groupSelection, hasClip,
   loadNote, moveInto, onEdgesChange, onNodesChange, paperKind, pasteClip, redo, selectedNodes, setPageSide, setPaper, startDrag, startEditing, stopEditing, takeOut,
@@ -179,7 +179,7 @@ function Canvas({ id, viewport }: { id: string; viewport?: Viewport }) {
     nodes: s.nodes, edges: s.edges, bg: s.bg, tool: s.tool, shape: s.shape, paper: s.paper, picking: s.picking,
     porting: !!s.portDraft, edgeKind: s.edgeStyle.kind,
   })))
-  const onPortDouble = usePortPlacing()
+  const onPortDouble = usePortPlacing(), onPortPress = usePortMoving()
   const [fitOnOpen] = useState(() => !viewport && nodes.length > 0 && !useEd.getState().paper)
   // 용지 노트를 처음 열면 첫 페이지를 화면 폭에 맞춰
   const [startView] = useState(() => {
@@ -307,7 +307,7 @@ function Canvas({ id, viewport }: { id: string; viewport?: Viewport }) {
   const ps = paper && pageSize(paper)
   return (
     <CanvasMenu>
-    <div className={`canvas tool-${tool}${picking ? ' picking' : ''}${paper ? ' paper' : ''}${porting ? ' porting' : ''}`} ref={wrap} onDoubleClickCapture={onPortDouble} onDoubleClick={onDoubleClick} onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
+    <div className={`canvas tool-${tool}${picking ? ' picking' : ''}${paper ? ' paper' : ''}${porting ? ' porting' : ''}`} ref={wrap} onMouseDownCapture={onPortPress} onDoubleClickCapture={onPortDouble} onDoubleClick={onDoubleClick} onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
       <ReactFlow
         nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes}
         onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} onConnectEnd={onConnectEnd} onReconnect={onReconnect}
