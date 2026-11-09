@@ -61,6 +61,36 @@ export function innerSize(s: Shape, w: number, h: number) {
   }
 }
 
+/** 도형 외곽선을 따라 촘촘히 찍은 점 (테두리 위 가장 가까운 곳을 찾는 데 쓴다) */
+export function outlinePoints(s: Shape, w: number, h: number, step = 1.5) {
+  const p = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+  p.setAttribute('d', shapePath(s, w, h))
+  const len = p.getTotalLength(), n = Math.max(8, Math.ceil(len / step))
+  return Array.from({ length: n }, (_, i) => { const q = p.getPointAtLength((i * len) / n); return { x: q.x, y: q.y } })
+}
+
+/** 연결점이 자석처럼 붙는 곳: 도형의 모서리와 각 변의 가운데 */
+export function shapeAnchors(s: Shape, w: number, h: number) {
+  const loop = (ps: number[][]) => ps.flatMap(([x, y], i) => {
+    const [a, b] = ps[(i + 1) % ps.length]
+    return [{ x, y }, { x: (x + a) / 2, y: (y + b) / 2 }]
+  })
+  if (s === 'ellipse') return Array.from({ length: 8 }, (_, i) => ({ x: (w / 2) * (1 + Math.cos((i * Math.PI) / 4)), y: (h / 2) * (1 + Math.sin((i * Math.PI) / 4)) }))
+  if (s === 'diamond') return loop([[w / 2, 0], [w, h / 2], [w / 2, h], [0, h / 2]])
+  if (s === 'para') { const k = slant(h, w); return loop([[k, 0], [w, 0], [w - k, h], [0, h]]) }
+  if (s === 'hex') { const k = slant(h, w); return loop([[k, 0], [w - k, 0], [w, h / 2], [w - k, h], [k, h], [0, h / 2]]) }
+  if (isMemo(s)) { const f = Math.min(MEMO.fold, w / 3, h / 3); return loop([[0, 0], [w, 0], [w, h - f], [w - f, h], [0, h]]) }
+  // 둥근 모서리는 호의 한가운데
+  const r = Math.min(s === 'round' ? 16 : 3, w / 2, h / 2), e = r * (1 - Math.SQRT1_2)
+  return [[e, e], [w - e, e], [w - e, h - e], [e, h - e], [w / 2, 0], [w, h / 2], [w / 2, h], [0, h / 2]].map(([x, y]) => ({ x, y }))
+}
+
+/** 연결점에서 가장 가까운 변 (선이 나가는 방향) */
+export function portSide(u: number, v: number): 't' | 'r' | 'b' | 'l' {
+  const d = [['t', v], ['r', 1 - u], ['b', 1 - v], ['l', u]] as const
+  return d.reduce((a, b) => (b[1] < a[1] ? b : a))[0]
+}
+
 export const defaultBox = (shape: Shape): BoxData => ({
   shape, title: '', body: '', media: [], fill: null, stroke: null, strokeWidth: 1.5, dash: 'solid', wrap: null,
 })

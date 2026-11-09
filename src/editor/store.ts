@@ -7,7 +7,7 @@ import { uid, updateNote } from '../lib/db'
 import { fitToPaper, newPaper, nodesByPage, pageAt, pageOrigin, pageSize, pagesSize, paperKind, relocate, type PaperKind } from '../lib/pages'
 import { applyToHtml, type Fmt } from '../lib/rich'
 import { boxAt, hierarchy, layoutSets, rectOf, type Frame, type Rect } from '../lib/sets'
-import { MEMO, defaultBox, defaultEdge, isMemo } from '../lib/shapes'
+import { MEMO, defaultBox, defaultEdge, isMemo, portSide } from '../lib/shapes'
 import { noteLook, type Theme } from '../lib/color'
 import { useSettings, useTheme } from '../lib/store'
 import type { Bg, BoxData, BoxNode, Defaults, EdgeData, LogicEdge, Note, Paper, Shape } from '../lib/types'
@@ -37,6 +37,8 @@ interface S {
   picking: string[] | null
   /** 손잡이로 크기를 바꾸고 있는 상자 (이때는 틀 움직임을 생략) */
   resizing: string | null
+  /** 테두리에 놓으려는 연결점 (상자 안 좌표) */
+  portDraft: { id: string; x: number; y: number; snapped: boolean } | null
   editingId: string | null
   editingEdge: string | null
   active: Editor | null
@@ -49,7 +51,7 @@ interface S {
 }
 
 export const useEd = create<S>(() => ({
-  noteId: '', title: '', bg: 'grid', ground: null, mode: null, paper: null, defaults: null, nodes: [], edges: [], frames: {}, dropTarget: null, picking: null, resizing: null,
+  noteId: '', title: '', bg: 'grid', ground: null, mode: null, paper: null, defaults: null, nodes: [], edges: [], frames: {}, dropTarget: null, picking: null, resizing: null, portDraft: null,
   editingId: null, editingEdge: null, active: null,
   tool: 'hand', shape: 'rect', edgeStyle: defaultEdge(), past: [], future: [], rev: 0,
 }))
@@ -85,7 +87,7 @@ export function loadNote(n: Note) {
   loading = true
   set({
     noteId: n.id, title: n.title, bg: n.bg ?? 'grid', ground: n.ground ?? null, mode: n.mode ?? null, paper: n.paper ?? null, defaults: n.defaults ?? null, nodes: n.nodes, edges: n.edges, frames: {},
-    editingId: null, editingEdge: null, dropTarget: null, picking: null, resizing: null, past: [], future: [], rev: 0, tool: 'hand',
+    editingId: null, editingEdge: null, dropTarget: null, picking: null, resizing: null, portDraft: null, past: [], future: [], rev: 0, tool: 'hand',
   })
   applyDefaults()
   loading = false
@@ -424,6 +426,28 @@ export function pasteClip(offset = 32) {
   nodes.forEach((n) => born.add(n.id))
   clip = { nodes: clean(nodes), edges }
   set((s) => ({ nodes: [...s.nodes.map((n) => ({ ...n, selected: false })), ...nodes], edges: [...s.edges, ...edges], rev: s.rev + 1 }))
+}
+
+// ── 연결점 ──
+/** 테두리에 연결점을 놓는다 (거의 같은 자리에 이미 있으면 그대로) */
+export function addPort(id: string, u: number, v: number) {
+  const ports = get().nodes.find((n) => n.id === id)?.data.ports ?? []
+  if (ports.some((p) => Math.hypot(p.u - u, p.v - v) < 0.02)) return
+  patchNodes([id], { ports: [...ports, { id: uid(), u, v }] })
+}
+/** 연결점을 지운다. 거기 이어진 선은 가장 가까운 변의 가운데로 옮겨 남긴다 */
+export function removePort(id: string, port: string) {
+  const p = get().nodes.find((n) => n.id === id)?.data.ports?.find((x) => x.id === port)
+  if (!p) return
+  const side = portSide(p.u, p.v)
+  patchNodes([id], (d) => ({ ports: (d.ports ?? []).filter((x) => x.id !== port) }))
+  set((s) => ({
+    edges: s.edges.map((e) => ({
+      ...e,
+      ...(e.source === id && e.sourceHandle === port && { sourceHandle: side }),
+      ...(e.target === id && e.targetHandle === port && { targetHandle: side }),
+    })),
+  }))
 }
 
 // ── A4 용지 ──

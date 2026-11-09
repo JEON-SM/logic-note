@@ -223,7 +223,7 @@ function SizeBox({ ids }: { ids: string[] }) {
           <button type="button" className="btn" onClick={() => { setW(''); setH(''); patchNodes(ids, { w: null, h: null, wrap: null }) }}>{t('자동')}</button>
           <button type="submit" className="btn primary">{t('적용')}</button>
         </div>
-        <p className="set-help">{t('선택한 상자 모서리를 끌어도 돼요. 손잡이를 두 번 누르면 자동 크기로.')}</p>
+        <p className="set-help">{t('선택한 상자의 모서리나 변을 끌어도 돼요.')}</p>
       </form>
     </Pop>
   )

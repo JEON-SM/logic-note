@@ -10,11 +10,11 @@ import { rectOf } from '../lib/sets'
 import { CItem, CSep } from '../ui/kit'
 import { toast } from '../ui/Toast'
 import {
-  CLIP_MARK, addBox, copySelection, effDefaults, cutSelection, groupSelection, hasClip, pasteClip, patchNodes, selectedNodes, startEditing, takeOut, useEd,
+  CLIP_MARK, addBox, copySelection, effDefaults, cutSelection, groupSelection, hasClip, pasteClip, patchNodes, removePort, selectedNodes, startEditing, takeOut, useEd,
 } from './store'
 import { t } from '../lib/i18n'
 
-type Ctx = { kind: 'nodes' } | { kind: 'edge'; id: string } | { kind: 'pane'; at: XYPosition }
+type Ctx = { kind: 'port'; node: string; id: string } | { kind: 'nodes' } | { kind: 'edge'; id: string } | { kind: 'pane'; at: XYPosition }
 type Box = { x0: number; y0: number; x1: number; y1: number }
 
 const selectOnly = (ids: string[]) => useEd.setState((s) => ({
@@ -76,7 +76,9 @@ export function CanvasMenu({ children }: { children: ReactElement }) {
     const node = t.closest<HTMLElement>('.react-flow__node')?.dataset.id
     const edge = t.closest<HTMLElement>('.react-flow__edge')?.dataset.id
     useEd.setState({ picking: null, dropTarget: null })
-    if (marqueed.current || t.closest('.react-flow__nodesselection')) setCtx({ kind: 'nodes' })
+    const port = t.closest<HTMLElement>('.react-flow__handle.port')?.dataset
+    if (port?.nodeid && port.handleid) setCtx({ kind: 'port', node: port.nodeid, id: port.handleid })
+    else if (marqueed.current || t.closest('.react-flow__nodesselection')) setCtx({ kind: 'nodes' })
     else if (node) {
       if (!useEd.getState().nodes.find((n) => n.id === node)?.selected) selectOnly([node])
       setCtx({ kind: 'nodes' })
@@ -103,7 +105,7 @@ export function CanvasMenu({ children }: { children: ReactElement }) {
       )}
       <ContextMenu.Portal>
         <ContextMenu.Content className="menu" collisionPadding={8} onCloseAutoFocus={(e) => e.preventDefault()}>
-          {ctx.kind === 'nodes' ? <NodeItems /> : ctx.kind === 'edge' ? <EdgeItems id={ctx.id} /> : <PaneItems at={ctx.at} />}
+          {ctx.kind === 'port' ? <CItem icon={<Trash2 size={15} />} danger onSelect={() => removePort(ctx.node, ctx.id)}>{t('연결점 삭제')}</CItem> : ctx.kind === 'nodes' ? <NodeItems /> : ctx.kind === 'edge' ? <EdgeItems id={ctx.id} /> : <PaneItems at={ctx.at} />}
         </ContextMenu.Content>
       </ContextMenu.Portal>
     </ContextMenu.Root>

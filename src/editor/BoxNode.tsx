@@ -1,12 +1,12 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from 'react'
-import { Handle, NodeResizer, Position, type NodeProps } from '@xyflow/react'
+import { Handle, NodeResizer, Position, useUpdateNodeInternals, type NodeProps } from '@xyflow/react'
 import { EditorContent, useEditor } from '@tiptap/react'
 import { animate } from 'motion/react'
 import { Play, X } from 'lucide-react'
 import { ACCENT, INK, SURFACE, readable, themeMap, toneOf } from '../lib/color'
 import { useMediaUrl, usePreview, youtubeId } from '../lib/media'
 import { htmlOf, markdownPaste, richExtensions, sanitize, linksIn } from '../lib/rich'
-import { MEMO, innerSize, isMemo, outerSize, shapePath } from '../lib/shapes'
+import { MEMO, innerSize, isMemo, outerSize, portSide, shapeAnchors, shapePath } from '../lib/shapes'
 import type { BoxData, BoxNode as BoxNodeT, MediaItem } from '../lib/types'
 import { born, commit, patchNodes, reportHead, stopEditing, useEd, useLook } from './store'
 import { t } from '../lib/i18n'
@@ -26,6 +26,9 @@ export const BoxNode = memo(function BoxNode({ id, data, selected }: NodeProps<B
   const editing = useEd((s) => s.editingId === id)
   const frame = useEd((s) => s.frames[id])
   const dropping = useEd((s) => s.dropTarget === id)
+  const draft = useEd((s) => (s.portDraft?.id === id ? s.portDraft : null))
+  const syncHandles = useUpdateNodeInternals()
+  useEffect(() => syncHandles(id), [id, data.ports, syncHandles])
   // 하나만 골랐을 때만 크기 손잡이를 보인다
   const solo = useEd((s) => selected && s.nodes.reduce((k, n) => k + (n.selected ? 1 : 0), 0) === 1)
   const center = useEd((s) => s.nodes.find((n) => n.id === id)?.position)
@@ -77,13 +80,7 @@ export const BoxNode = memo(function BoxNode({ id, data, selected }: NodeProps<B
 
   return (
     <div ref={box} className={`box tone-${tone}${frame ? ' set' : ''}${memoKind ? ' memo' : ''}`}
-      style={{ width: w, height: h, ['--ink' as string]: readable('#1C1C1E', fill === 'transparent' ? ground : fill) }}
-      onDoubleClick={(e) => {
-        // 크기 손잡이를 두 번 누르면 자동 크기로
-        if (!(e.target as Element).closest('.react-flow__resize-control')) return
-        e.stopPropagation()
-        patchNodes([id], { w: null, h: null, wrap: null })
-      }}>
+      style={{ width: w, height: h, ['--ink' as string]: readable('#1C1C1E', fill === 'transparent' ? ground : fill) }}>
       <svg className="box-shape" width={w} height={h}>
         {selected && <path data-f className="box-halo" d={d} fill="none" stroke={ACCENT} strokeWidth={sw + 4} strokeLinejoin="round" />}
         <path data-f className="box-main" d={d} fill={fill} stroke={data.dash === 'none' ? 'none' : stroke} strokeWidth={sw}
@@ -98,6 +95,12 @@ export const BoxNode = memo(function BoxNode({ id, data, selected }: NodeProps<B
         )}
         {memoKind && <path d={`M${w} ${h - fold}L${w - fold} ${h - fold}L${w - fold} ${h}Z`} fill="var(--ink)" fillOpacity={0.12} />}
         {dropping && <path data-f className="box-drop" d={d} fill={ACCENT} fillOpacity={0.06} stroke={ACCENT} strokeWidth={2} strokeDasharray="5 4" strokeLinejoin="round" />}
+        {draft && (
+          <g>
+            {shapeAnchors(data.shape, w, h).map((a, i) => <circle key={i} cx={a.x} cy={a.y} r={2.5} fill={ACCENT} opacity={0.5} />)}
+            <circle className="port-dot" r={draft.snapped ? 7 : 5} fill={ACCENT} stroke="#fff" strokeWidth={1.5} style={{ transform: `translate(${draft.x}px, ${draft.y}px)` }} />
+          </g>
+        )}
       </svg>
       <div ref={content} className={`box-content${editing ? ' nodrag nopan editing' : ''}`}
         onContextMenu={editing ? (e) => e.stopPropagation() : undefined}
@@ -110,7 +113,12 @@ export const BoxNode = memo(function BoxNode({ id, data, selected }: NodeProps<B
         <NodeResizer minWidth={48} minHeight={frame ? 40 : Math.round(natural.h)} handleClassName="rs-h" lineClassName="rs-l"
           onResizeStart={() => { commit(); useEd.setState({ resizing: id }) }} onResizeEnd={() => useEd.setState({ resizing: null })} />
       )}
-      {SIDES.map((s) => <Handle key={s.id} id={s.id} type="source" position={s.pos} className="h" />)}
+      {/* 네 변 가운데의 점은 보이지 않는다: 기존 선과 '상자에 놓아 연결'에만 쓴다 */}
+      {SIDES.map((s) => <Handle key={s.id} id={s.id} type="source" position={s.pos} className="h base" isConnectableStart={false} />)}
+      {data.ports?.map((p) => (
+        <Handle key={p.id} id={p.id} type="source" position={SIDES.find((s) => s.id === portSide(p.u, p.v))!.pos} className="h port"
+          style={{ left: `${p.u * 100}%`, top: `${p.v * 100}%`, right: 'auto', bottom: 'auto', transform: 'translate(-50%, -50%)' }} />
+      ))}
     </div>
   )
 })

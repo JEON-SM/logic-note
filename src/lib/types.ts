@@ -5,6 +5,9 @@ export type Bg = 'grid' | 'grid-wide' | 'dots' | 'dots-wide' | 'lines' | 'none'
 
 export interface MediaItem { id: string; kind: 'image' | 'video'; mediaId: string }
 
+/** 사용자가 테두리에 놓은 연결점. u·v는 상자 폭·높이에 대한 비율 */
+export interface Port { id: string; u: number; v: number }
+
 export type BoxData = {
   shape: Shape
   title: string
@@ -20,6 +23,7 @@ export type BoxData = {
   w?: number | null
   h?: number | null
   hidePreview?: boolean
+  ports?: Port[]
   /** 이 상자를 감싸는 상자(집합) */
   parent?: string | null
 }

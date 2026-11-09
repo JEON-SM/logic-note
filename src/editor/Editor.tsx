@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react'
 import {
-  Background, BackgroundVariant, ConnectionMode, ReactFlow, ReactFlowProvider, SelectionMode, reconnectEdge, useReactFlow, useStore,
+  Background, BackgroundVariant, ConnectionLineType, ConnectionMode, ReactFlow, ReactFlowProvider, SelectionMode, reconnectEdge, useReactFlow, useStore,
   type Connection, type FinalConnectionState, type Viewport,
 } from '@xyflow/react'
 import { useShallow } from 'zustand/react/shallow'
@@ -25,6 +25,7 @@ import { Toolbar } from './Toolbar'
 import { ExportDialog, openExport } from './ExportDialog'
 import { PageIndicator, PageSorter, PagesLayer, openPages } from './Pages'
 import { usePageNav, usePageWheel, useSnapToPage } from './pageNav'
+import { usePortPlacing } from './ports'
 import {
   CLIP_MARK, addBox, addLink, canHold, commit, copySelection, cutSelection, dragOver, effDefaults, finishDrag, flushSave, groupSelection, hasClip,
   loadNote, moveInto, onEdgesChange, onNodesChange, paperKind, pasteClip, redo, selectedNodes, setPageSide, setPaper, startDrag, startEditing, stopEditing, takeOut,
@@ -174,9 +175,11 @@ function Canvas({ id, viewport }: { id: string; viewport?: Viewport }) {
   const look = useLook(), theme = look.theme
   const rf = useReactFlow()
   const wrap = useRef<HTMLDivElement>(null)
-  const { nodes, edges, bg, tool, shape, paper, picking } = useEd(useShallow((s) => ({
+  const { nodes, edges, bg, tool, shape, paper, picking, porting, edgeKind } = useEd(useShallow((s) => ({
     nodes: s.nodes, edges: s.edges, bg: s.bg, tool: s.tool, shape: s.shape, paper: s.paper, picking: s.picking,
+    porting: !!s.portDraft, edgeKind: s.edgeStyle.kind,
   })))
+  const onPortDouble = usePortPlacing()
   const [fitOnOpen] = useState(() => !viewport && nodes.length > 0 && !useEd.getState().paper)
   // 용지 노트를 처음 열면 첫 페이지를 화면 폭에 맞춰
   const [startView] = useState(() => {
@@ -304,11 +307,12 @@ function Canvas({ id, viewport }: { id: string; viewport?: Viewport }) {
   const ps = paper && pageSize(paper)
   return (
     <CanvasMenu>
-    <div className={`canvas tool-${tool}${picking ? ' picking' : ''}${paper ? ' paper' : ''}`} ref={wrap} onDoubleClick={onDoubleClick} onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
+    <div className={`canvas tool-${tool}${picking ? ' picking' : ''}${paper ? ' paper' : ''}${porting ? ' porting' : ''}`} ref={wrap} onDoubleClickCapture={onPortDouble} onDoubleClick={onDoubleClick} onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
       <ReactFlow
         nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes}
         onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} onConnectEnd={onConnectEnd} onReconnect={onReconnect}
         nodeOrigin={[0.5, 0.5]} connectionMode={ConnectionMode.Loose} connectionRadius={32}
+        connectionLineType={edgeKind === 'straight' ? ConnectionLineType.Straight : edgeKind === 'step' ? ConnectionLineType.SmoothStep : ConnectionLineType.Bezier}
         defaultViewport={startView} fitView={fitOnOpen} fitViewOptions={{ padding: 0.25, maxZoom: 1 }}
         translateExtent={ps ? [[-ps.w * 1.5, -ps.h], [pagesSize(paper!).w + ps.w * 1.5, pagesSize(paper!).h + ps.h]] : undefined}
         nodesDraggable={!picking}

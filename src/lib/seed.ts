@@ -30,7 +30,7 @@ export async function seedIfEmpty() {
       box('tip', -400, 20, {
         shape: 'memo', fill: '#FFF4C2', dash: 'none', w: 220, h: 176,
         title: p('사용법'),
-        body: `<ul>${['빈 곳 두 번 눌러 상자', '상자 두 번 눌러 편집', '가장자리 점을 끌어 연결', 'Tab: 이어지는 상자'].map((s) => `<li>${p(s)}</li>`).join('')}</ul>`,
+        body: `<ul>${['빈 곳 두 번 눌러 상자', '상자 두 번 눌러 편집', '테두리를 두 번 눌러 점을 만들고 끌어서 연결', 'Tab: 이어지는 상자'].map((s) => `<li>${p(s)}</li>`).join('')}</ul>`,
       }),
     ],
     edges: [
