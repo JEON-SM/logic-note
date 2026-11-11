@@ -248,8 +248,17 @@ function BoxEditor({ id, html, editing }: { id: string; html: string; editing: b
     if (!editor || editor.isDestroyed) return
     const c = editing ? takeCaret(id) : null
     const at = c && editor.view.posAtCoords({ left: c.x, top: c.y })
-    if (at) editor.chain().focus(undefined, { scrollIntoView: false }).setTextSelection(at.pos).run()
-    else if (!editor.isFocused && (editing || mayTakeFocus())) editor.commands.focus('end', { scrollIntoView: false })
+    if (!at && editor.isFocused) return
+    editor.commands.setTextSelection(at ? at.pos : editor.state.doc.content.size)
+    // 방금 그린 상자는 React Flow가 크기를 재기 전까지 숨겨져 있어 포커스를 받지 못한다. 나타날 때까지 몇 프레임 다시 시도
+    let tries = 30, raf = 0
+    const go = () => {
+      if (editor.isDestroyed || editor.view.hasFocus()) return
+      if (editing || mayTakeFocus()) editor.view.focus()
+      if (!editor.view.hasFocus() && --tries > 0) raf = requestAnimationFrame(go)
+    }
+    go()
+    return () => cancelAnimationFrame(raf)
   }, [editor, editing, id])
   return <EditorContent editor={editor} className="tx rich" />
 }
