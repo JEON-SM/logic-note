@@ -23,7 +23,8 @@ const cls = (...a: (string | false | null | undefined)[]) => a.filter(Boolean).j
 /** 상자 안에서 글이 놓이는 영역 (도형 안쪽) */
 function textArea(data: BoxData, w: number, h: number) {
   if (isMemo(data.shape)) return { x: MEMO.pad, y: MEMO.pad, w: Math.max(16, w - MEMO.pad * 2), h: Math.max(18, h - MEMO.pad * 2) }
-  const i = innerSize(data.shape, w, h)
+  // 마름모: 한 줄 높이(22px)의 글이 꼭짓점 사이에 들어가는 폭 (글에 맞춰 잰 크기와 같은 계산)
+  const i = data.shape === 'diamond' ? { w: (w - 28) * (1 - 22 / Math.max(23, h - 20)), h: h - 20 } : innerSize(data.shape, w, h)
   const iw = Math.min(w, Math.max(16, i.w)), ih = Math.min(h, Math.max(18, i.h))
   return { x: (w - iw) / 2, y: (h - ih) / 2, w: iw, h: ih }
 }
