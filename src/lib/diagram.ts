@@ -5,7 +5,8 @@ import type { MermaidConfig } from 'mermaid'
 import { textVars } from './color'
 import { plain, uid } from './db'
 import { lang, t } from './i18n'
-import { attachPorts, defaultBox, defaultEdge, outerSize } from './shapes'
+import { boxParts } from './boxtext'
+import { attachPorts, defaultBox, defaultEdge, normalizeShape, outerSize } from './shapes'
 import type { BoxNode, EdgeData, LogicEdge, Rel, Shape } from './types'
 
 type Dir = 'TB' | 'BT' | 'LR' | 'RL'
@@ -346,6 +347,21 @@ async function layout(gr: Graph, kind: EdgeData['kind']): Promise<{ nodes: BoxNo
     const p = dg.node(b.id)
     return [b.id, sets.has(b.n.key) ? { w: Math.round(p.width ?? 0), h: Math.round(p.height ?? 0) } : b.size]
   }))
+  // 집합: 안쪽 상자를 둘러싸는 크기로 (안쪽 집합부터). 이름이 있으면 위쪽에 그 자리를 더 둔다.
+  // 이제 바깥 상자는 저절로 늘어나지 않으니 여기서 크기를 정해 둔다
+  const kidsOf = new Map<string, string[]>()
+  for (const b of built) if (b.n.parent && idOf.has(b.n.parent)) { const p = idOf.get(b.n.parent)!; kidsOf.set(p, [...(kidsOf.get(p) ?? []), b.id]) }
+  const byKey = new Map(built.map((b) => [b.n.key, b]))
+  const depthOf = (b: (typeof built)[number]) => { let d = 0; for (let p = b.n.parent; p && byKey.has(p); p = byKey.get(p)!.n.parent) d++; return d }
+  for (const b of built.filter((x) => sets.has(x.n.key)).sort((a, c) => depthOf(c) - depthOf(a))) {
+    const rs = (kidsOf.get(b.id) ?? []).map((k) => { const p = pos.get(k)!, z = size.get(k)!; return { x: p.x - z.w / 2, y: p.y - z.h / 2, w: z.w, h: z.h } })
+    if (!rs.length) continue
+    const head = b.title ? 32 : 0
+    const x0 = Math.min(...rs.map((r) => r.x)) - 16, y0 = Math.min(...rs.map((r) => r.y)) - 16 - head
+    const x1 = Math.max(...rs.map((r) => r.x + r.w)) + 16, y1 = Math.max(...rs.map((r) => r.y + r.h)) + 16
+    pos.set(b.id, { x: Math.round((x0 + x1) / 2), y: Math.round((y0 + y1) / 2) })
+    size.set(b.id, { w: Math.round(x1 - x0), h: Math.round(y1 - y0) })
+  }
   const vertical = gr.dir === 'TB' || gr.dir === 'BT'
 
   /** 되먹임 선: 두 상자의 같은 쪽 면에서 나가 다른 상자들을 비켜 돌아간다. 덜 돌아가는 쪽을 고른다 */
@@ -369,7 +385,9 @@ async function layout(gr: Graph, kind: EdgeData['kind']): Promise<{ nodes: BoxNo
   const nodes = built.map((b): BoxNode => ({
     id: b.id, type: 'box', position: pos.get(b.id)!, measured: { width: size.get(b.id)!.w, height: size.get(b.id)!.h },
     data: {
-      ...defaultBox(b.n.shape), title: b.title, body: b.body,
+      // 제목은 글 첫 줄(제목 줄 서식). 일반 상자 크기는 화면에서 글에 맞춰 재고, 집합은 위에서 정한 크기
+      ...defaultBox(normalizeShape(b.n.shape).shape), body: b.title + b.body, head: !!b.title,
+      ...(sets.has(b.n.key) && { w: size.get(b.id)!.w, h: size.get(b.id)!.h }),
       fill: b.n.fill ?? null, stroke: b.n.stroke ?? null, strokeWidth: b.n.strokeWidth ?? 1.5, dash: b.n.dash ?? 'solid',
       parent: b.n.parent ? idOf.get(b.n.parent) ?? null : null,
     },
@@ -403,6 +421,7 @@ export async function parseDiagram(text: string, kind: EdgeData['kind'] = 'bezie
   }
   if (!gr.nodes.length) throw new Error(t('도식에 상자가 없어요.'))
   const laid = await layout(gr, kind), { nodes, edges } = attachPorts(laid.nodes, laid.edges)
-  const title = gr.title || plain(nodes[0].data.title) || t('가져온 도식')
+  const first = boxParts(nodes[0].data)
+  const title = gr.title || plain(first.title || first.body).slice(0, 60) || t('가져온 도식')
   return { title, nodes, edges, source: k === 'dot' ? 'Graphviz' : 'Mermaid' }
 }

@@ -1,6 +1,6 @@
 // A4 용지 노트: 페이지를 아래로(기본) 또는 옆으로 이어 놓은 캔버스.
 // 상자는 따로 페이지 번호를 갖지 않고, 가장 바깥 상자의 중심이 놓인 페이지에 속한다.
-import { hierarchy, rectOf, type Frame } from './sets'
+import { hierarchy, rectOf } from './sets'
 import type { BoxNode, Paper } from './types'
 
 type XY = { x: number; y: number }
@@ -59,9 +59,9 @@ export function relocate(old: Paper, next: Paper, nodes: BoxNode[], to: (i: numb
 }
 
 /** 무한 캔버스의 내용을 첫 페이지 왼쪽 위부터 놓고, 필요한 만큼 페이지를 만든다 */
-export function fitToPaper(p: Paper, nodes: BoxNode[], frames: Record<string, Frame>) {
+export function fitToPaper(p: Paper, nodes: BoxNode[]) {
   if (!nodes.length) return { paper: p, nodes, overflow: false }
-  const rs = nodes.map((n) => rectOf(n, frames[n.id]))
+  const rs = nodes.map(rectOf)
   const x0 = Math.min(...rs.map((r) => r.x)), y0 = Math.min(...rs.map((r) => r.y))
   const x1 = Math.max(...rs.map((r) => r.x + r.w)), y1 = Math.max(...rs.map((r) => r.y + r.h))
   const { w, h } = pageSize(p)

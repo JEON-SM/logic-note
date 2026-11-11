@@ -67,7 +67,7 @@ export function PageIndicator({ paper }: { paper: Paper }) {
 /** 페이지 정렬: 끌어서 순서 바꾸기, 복제·삭제, 추가, 용지 방향 */
 export function PageSorter() {
   const open = useOpen((s) => s.open)
-  const { paper, nodes, edges, frames } = useEd(useShallow((s) => ({ paper: s.paper, nodes: s.nodes, edges: s.edges, frames: s.frames })))
+  const { paper, nodes, edges } = useEd(useShallow((s) => ({ paper: s.paper, nodes: s.nodes, edges: s.edges })))
   const go = usePageNav()
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -96,7 +96,7 @@ export function PageSorter() {
         <SortableContext items={paper.pages} strategy={rectSortingStrategy}>
           <div className={`page-grid${paper.landscape ? ' land' : ''}`}>
             {paper.pages.map((id, i) => (
-              <PageCard key={id} id={id} index={i} paper={paper} ids={by[i] ?? []} nodes={nodes} edges={edges} frames={frames}
+              <PageCard key={id} id={id} index={i} paper={paper} ids={by[i] ?? []} nodes={nodes} edges={edges}
                 onOpen={() => { close(); go(i, 'top', 0) }} />
             ))}
             <button type="button" className="page-card page-card-add" onClick={() => addPage()} aria-label={t('페이지 추가')}><Plus size={22} /></button>
@@ -107,9 +107,9 @@ export function PageSorter() {
   )
 }
 
-function PageCard({ id, index, paper, ids, nodes, edges, frames, onOpen }: {
+function PageCard({ id, index, paper, ids, nodes, edges, onOpen }: {
   id: string; index: number; paper: Paper; ids: string[]; onOpen: () => void
-  nodes: ReturnType<typeof useEd.getState>['nodes']; edges: ReturnType<typeof useEd.getState>['edges']; frames: ReturnType<typeof useEd.getState>['frames']
+  nodes: ReturnType<typeof useEd.getState>['nodes']; edges: ReturnType<typeof useEd.getState>['edges']
 }) {
   const { theme, ground } = useLook()
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id })
@@ -121,7 +121,7 @@ function PageCard({ id, index, paper, ids, nodes, edges, frames, onOpen }: {
       style={{ transform: CSS.Transform.toString(transform), transition }} {...attributes} {...listeners}
       onClick={onOpen}>
       <div className="page-thumb">
-        <Thumb nodes={nodes.filter((n) => on.has(n.id))} edges={edges.filter((e) => on.has(e.source) && on.has(e.target))} frames={frames} theme={theme} ground={ground}
+        <Thumb nodes={nodes.filter((n) => on.has(n.id))} edges={edges.filter((e) => on.has(e.source) && on.has(e.target))} theme={theme} ground={ground}
           area={{ ...pageOrigin(paper, index), w, h }} />
       </div>
       <div className="page-card-foot">

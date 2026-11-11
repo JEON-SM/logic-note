@@ -1,22 +1,37 @@
-import type { BoxData, BoxNode, Defaults, EdgeData, LogicEdge, Port, Rel, Shape } from './types'
+import type { BoxData, BoxNode, Defaults, EdgeData, LogicEdge, Port, Rel, Rule, Shape } from './types'
 import { t } from '../lib/i18n'
 
 export const SHAPES: { id: Shape; label: string }[] = [
   { id: 'rect', label: t('사각형') },
-  { id: 'round', label: t('둥근 사각형') },
   { id: 'ellipse', label: t('원') },
   { id: 'diamond', label: t('마름모') },
   { id: 'para', label: t('평행사변형') },
   { id: 'hex', label: t('육각형') },
 ]
 
-/** 메모지: 접힌 모서리가 있는 종이. 글은 왼쪽 위부터 */
+/** 메모지: 접힌 모서리가 있는 종이. 글은 왼쪽 위부터. 'memo-lined'는 메모지 + 줄 서식으로 만든다 */
 export const MEMOS: { id: Shape; label: string }[] = [
   { id: 'memo', label: t('메모지') },
   { id: 'memo-lined', label: t('줄 메모지') },
 ]
 export const isMemo = (s: Shape) => s === 'memo' || s === 'memo-lined'
-export const MEMO = { w: 200, h: 200, fill: '#FFF4C2', pad: 14, line: 24, fold: 18 }
+export const MEMO = { w: 192, h: 192, fill: '#FFF4C2', pad: 14, line: 24, fold: 18 }
+
+/** 예전 모양 → 지금 모양 (둥근 사각형은 사각형, 줄 메모지는 메모지 + 줄 서식) */
+export const normalizeShape = (s: Shape): { shape: Shape; rule?: Rule } =>
+  s === 'round' ? { shape: 'rect' } : s === 'memo-lined' ? { shape: 'memo', rule: 'lines' } : { shape: s }
+
+/** 새 상자의 기본 크기 (모눈 24px에 맞춤) */
+export const boxSize = (s: Shape): { w: number; h: number } => {
+  switch (normalizeShape(s).shape) {
+    case 'ellipse': return { w: 144, h: 72 }
+    case 'diamond': return { w: 168, h: 96 }
+    case 'para':
+    case 'hex': return { w: 168, h: 48 }
+    case 'memo': return { w: MEMO.w, h: MEMO.h }
+    default: return { w: 144, h: 48 }
+  }
+}
 
 const slant = (h: number, w: number) => Math.min(h * 0.32, w * 0.2)
 
@@ -26,9 +41,9 @@ export function shapePath(s: Shape, w: number, h: number): string {
   if (s === 'diamond') return `M${w / 2} 0L${w} ${h / 2}L${w / 2} ${h}L0 ${h / 2}Z`
   if (s === 'para') { const k = slant(h, w); return `M${k} 0H${w}L${w - k} ${h}H0Z` }
   if (s === 'hex') { const k = slant(h, w); return `M${k} 0H${w - k}L${w} ${h / 2}L${w - k} ${h}H${k}L0 ${h / 2}Z` }
-  if (isMemo(s)) { const f = Math.min(MEMO.fold, w / 3, h / 3); return `M2 0H${w}V${h - f}L${w - f} ${h}H2A2 2 0 0 1 0 ${h - 2}V2A2 2 0 0 1 2 0Z` }
-  const r = Math.min(s === 'round' ? 16 : 3, w / 2, h / 2)
-  return `M${r} 0H${w - r}A${r} ${r} 0 0 1 ${w} ${r}V${h - r}A${r} ${r} 0 0 1 ${w - r} ${h}H${r}A${r} ${r} 0 0 1 0 ${h - r}V${r}A${r} ${r} 0 0 1 ${r} 0Z`
+  if (isMemo(s)) { const f = Math.min(MEMO.fold, w / 3, h / 3); return `M0 0H${w}V${h - f}L${w - f} ${h}H0Z` }
+  // 사각형은 모서리가 각지다 (예전 둥근 사각형도)
+  return `M0 0H${w}V${h}H0Z`
 }
 
 /** 내용 크기 → 도형 크기 (내용이 도형 안에 들어가도록) */
@@ -39,7 +54,6 @@ export function outerSize(s: Shape, cw: number, ch: number) {
     case 'diamond': return { w: cw + 2 * ch + 28, h: ch + cw / 2 + 20 }
     case 'para':
     case 'hex': { const h = ch + 20; return { w: cw + 32 + 2 * slant(h, cw + 32), h } }
-    case 'round': return { w: cw + 40, h: ch + 22 }
     case 'memo':
     case 'memo-lined': return { w: cw + MEMO.pad * 2, h: ch + MEMO.pad * 2 }
     default: return { w: cw + 32, h: ch + 20 }
@@ -54,7 +68,6 @@ export function innerSize(s: Shape, w: number, h: number) {
     case 'diamond': return { w: w / 2 - 14, h: h / 2 - 10 }
     case 'para':
     case 'hex': return { w: w - 32 - 2 * slant(h, w), h: h - 20 }
-    case 'round': return { w: w - 40, h: h - 22 }
     case 'memo':
     case 'memo-lined': return { w: w - MEMO.pad * 2, h: h - MEMO.pad * 2 }
     default: return { w: w - 32, h: h - 20 }
@@ -80,9 +93,7 @@ export function shapeAnchors(s: Shape, w: number, h: number) {
   if (s === 'para') { const k = slant(h, w); return loop([[k, 0], [w, 0], [w - k, h], [0, h]]) }
   if (s === 'hex') { const k = slant(h, w); return loop([[k, 0], [w - k, 0], [w, h / 2], [w - k, h], [k, h], [0, h / 2]]) }
   if (isMemo(s)) { const f = Math.min(MEMO.fold, w / 3, h / 3); return loop([[0, 0], [w, 0], [w, h - f], [w - f, h], [0, h]]) }
-  // 둥근 모서리는 호의 한가운데
-  const r = Math.min(s === 'round' ? 16 : 3, w / 2, h / 2), e = r * (1 - Math.SQRT1_2)
-  return [[e, e], [w - e, e], [w - e, h - e], [e, h - e], [w / 2, 0], [w, h / 2], [w / 2, h], [0, h / 2]].map(([x, y]) => ({ x, y }))
+  return loop([[0, 0], [w, 0], [w, h], [0, h]])
 }
 
 /** 연결점에서 가장 가까운 변 (선이 나가는 방향) */

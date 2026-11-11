@@ -6,8 +6,8 @@ import { ContextMenu } from 'radix-ui'
 import {
   BoxSelect, ClipboardPaste, Copy, Group, LogIn, LogOut, Scaling, Scissors, Square, StickyNote, Tag, Trash2, NotebookPen,
 } from 'lucide-react'
-import { rectOf } from '../lib/sets'
-import { CItem, CSep } from '../ui/kit'
+import { hierarchy, rectOf } from '../lib/sets'
+import { CItem, CSep, backToBox } from '../ui/kit'
 import { toast } from '../ui/Toast'
 import {
   CLIP_MARK, addBox, copySelection, effDefaults, cutSelection, groupSelection, hasClip, pasteClip, patchNodes, selectedNodes, startEditing, takeOut, useEd,
@@ -56,11 +56,12 @@ export function CanvasMenu({ children }: { children: ReactElement }) {
       if (!moved) return
       const a = rf.screenToFlowPosition({ x: Math.min(b.x0, b.x1), y: Math.min(b.y0, b.y1) })
       const z = rf.screenToFlowPosition({ x: Math.max(b.x0, b.x1), y: Math.max(b.y0, b.y1) })
-      const { nodes, frames } = useEd.getState()
-      // 걸치기만 해도 고르되, 집합(틀)은 통째로 들어와야 고른다
+      const { nodes } = useEd.getState()
+      const { kids } = hierarchy(nodes)
+      // 걸치기만 해도 고르되, 안에 상자가 있는 상자는 통째로 들어와야 고른다
       const hit = nodes.filter((n) => {
-        const r = rectOf(n, frames[n.id])
-        return frames[n.id]
+        const r = rectOf(n)
+        return kids.has(n.id)
           ? r.x >= a.x && r.y >= a.y && r.x + r.w <= z.x && r.y + r.h <= z.y
           : r.x < z.x && r.x + r.w > a.x && r.y < z.y && r.y + r.h > a.y
       }).map((n) => n.id)
@@ -105,7 +106,7 @@ export function CanvasMenu({ children }: { children: ReactElement }) {
         }} />
       )}
       <ContextMenu.Portal>
-        <ContextMenu.Content className="menu" collisionPadding={8} onCloseAutoFocus={(e) => e.preventDefault()}>
+        <ContextMenu.Content className="menu" collisionPadding={8} onCloseAutoFocus={backToBox}>
           {ctx.kind === 'port' ? <CItem icon={<Trash2 size={15} />} danger onSelect={() => void deletePort(ctx.node, ctx.id)}>{t('연결점 삭제')}</CItem> : ctx.kind === 'nodes' ? <NodeItems /> : ctx.kind === 'edge' ? <EdgeItems id={ctx.id} /> : <PaneItems at={ctx.at} />}
         </ContextMenu.Content>
       </ContextMenu.Portal>
@@ -118,7 +119,6 @@ function NodeItems() {
   const sel = selectedNodes()
   const ids = sel.map((n) => n.id)
   const inSet = sel.some((n) => n.data.parent)
-  const sized = sel.some((n) => n.data.w || n.data.h)
   return (
     <>
       <div className="menu-label">{t('상자 {{count}}개', { count: ids.length })}</div>
@@ -130,7 +130,7 @@ function NodeItems() {
       <CItem icon={<LogIn size={15} />} onSelect={() => startPicking(ids)}>{t('다른 상자에 넣기…')}</CItem>
       <CItem icon={<Group size={15} />} hint="Ctrl+G" onSelect={groupSelection}>{t('집합으로 묶기')}</CItem>
       {inSet && <CItem icon={<LogOut size={15} />} hint="Ctrl+Shift+G" onSelect={() => takeOut(ids)}>{t('집합에서 꺼내기')}</CItem>}
-      {sized && <CItem icon={<Scaling size={15} />} onSelect={() => patchNodes(ids, { w: null, h: null, wrap: null })}>{t('크기 자동 맞춤')}</CItem>}
+      <CItem icon={<Scaling size={15} />} onSelect={() => patchNodes(ids, { w: null, h: null, wrap: null })}>{t('크기를 글에 맞추기')}</CItem>
     </>
   )
 }
@@ -146,7 +146,7 @@ function EdgeItems({ id }: { id: string }) {
 }
 
 function PaneItems({ at }: { at: XYPosition }) {
-  const add = (shape: Parameters<typeof addBox>[1]) => startEditing(addBox(at, shape))
+  const add = (shape: Parameters<typeof addBox>[1]) => startEditing(addBox(at, shape), undefined, false)
   return (
     <>
       <CItem icon={<Square size={15} />} onSelect={() => add(effDefaults().shape)}>{t('여기에 상자')}</CItem>

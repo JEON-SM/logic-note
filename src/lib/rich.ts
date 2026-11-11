@@ -113,6 +113,34 @@ export function applyToHtml(html: string, fn: Fmt): string {
 
 export const htmlOf = (ed: Editor) => (ed.isEmpty ? '' : ed.getHTML())
 
+/** 서식 브러시가 옮기는 글자 모양 (상자 글 전체 기준) */
+export interface TextLook { font?: string; size?: string; color?: string; bold: boolean; italic: boolean; underline: boolean; align?: string }
+
+/** 상자 글 전체의 글자 모양 (섞여 있으면 첫 글자 쪽) */
+export function readTextLook(html: string): TextLook {
+  const ed = new Editor({ element: document.createElement('div'), extensions: richExtensions(), content: html || '' })
+  ed.commands.selectAll()
+  const ts = ed.getAttributes('textStyle')
+  const out: TextLook = {
+    font: ts.fontFamily || undefined, size: ts.fontSize || undefined, color: ts.color || undefined,
+    bold: ed.isActive('bold'), italic: ed.isActive('italic'), underline: ed.isActive('underline'),
+    align: ed.getAttributes('paragraph').textAlign || ed.getAttributes('heading').textAlign || undefined,
+  }
+  ed.destroy()
+  return out
+}
+
+/** 글자 모양을 글 전체에 입히는 서식 명령 */
+export const textLookFmt = (l: TextLook): Fmt => (c) => {
+  let x = l.font ? c.setFontFamily(l.font) : c.unsetFontFamily()
+  x = l.size ? x.setFontSize(l.size) : x.unsetFontSize()
+  x = l.color ? x.setColor(l.color) : x.unsetColor()
+  x = l.bold ? x.setBold() : x.unsetBold()
+  x = l.italic ? x.setItalic() : x.unsetItalic()
+  x = l.underline ? x.setUnderline() : x.unsetUnderline()
+  return l.align ? x.setTextAlign(l.align) : x.unsetTextAlign()
+}
+
 const cache = new Map<string, string>()
 export const sanitize = (html: string) => {
   let s = cache.get(html)

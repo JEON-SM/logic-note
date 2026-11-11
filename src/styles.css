@@ -249,9 +249,16 @@ a { color: inherit; text-decoration: none; }
 .toolbar::-webkit-scrollbar { display: none; }
 .tb-inner { display: flex; align-items: center; justify-content: center; gap: 2px; min-width: max-content; height: 46px; padding: 0 12px; margin: 0 auto; }
 .canvas { position: relative; flex: 1; min-height: 0; }
-.canvas.tool-place .react-flow__pane { cursor: crosshair; }
-.canvas.tool-hand .react-flow__pane { cursor: default; }
-.canvas.tool-hand .react-flow__pane.dragging { cursor: grabbing; }
+.canvas.tool-draw .react-flow__pane, .canvas.tool-place .react-flow__pane, .canvas.tool-place .react-flow__node { cursor: crosshair; }
+.canvas.tool-hand .react-flow__pane, .canvas.spacing .react-flow__pane, .canvas.spacing .react-flow__node { cursor: grab; }
+.canvas .react-flow__pane.dragging { cursor: grabbing; }
+.canvas.painting .react-flow__node { cursor: copy; }
+/* 끌어서 그리는 상자 (모눈에 맞춘 크기를 함께 보여 준다) */
+.draw-rect { position: fixed; z-index: 20; pointer-events: none; border: 1.5px solid var(--accent); background: rgba(255, 95, 31, 0.06); }
+.draw-size {
+  position: absolute; right: -1px; bottom: -22px; padding: 1px 6px; background: var(--accent); color: #fff;
+  font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap;
+}
 .hint { position: absolute; left: 50%; top: 42%; transform: translateX(-50%); color: var(--text-3); font-size: 14px; pointer-events: none; }
 .zoom {
   position: absolute; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 5;
@@ -264,18 +271,45 @@ a { color: inherit; text-decoration: none; }
 @media (max-width: 760px) { .tb-inner { justify-content: flex-start; } }
 
 /* ── 상자 ── */
-.box { position: relative; font-size: 13px; color: var(--ink); }
+.box { position: relative; font-size: 14px; color: var(--ink); --rule: color-mix(in srgb, var(--ink) 16%, transparent); }
 .box-shape { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
-.box-content {
-  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
-  width: max-content; min-width: 24px; text-align: center; overflow-wrap: anywhere;
+/* 글 영역: 상자 크기는 그대로 두고, 넘치는 글은 상자 안에서 스크롤한다 (엑셀 셀처럼 아래로 이어 쓴다) */
+.box-area {
+  position: absolute; display: flex; flex-direction: column; overflow: hidden; text-align: center; overflow-wrap: anywhere;
+  /* 스크롤 막대는 숨긴다: 고를 때 막대만큼 폭이 줄어 글줄이 바뀌지 않게 (넘친 글은 아래 흐림으로 알린다) */
+  scrollbar-width: none;
 }
-.box-content.editing { min-width: 120px; cursor: text; }
+.box-area::-webkit-scrollbar { display: none; }
+/* 편집기는 보기용 글과 똑같이 그린다 (글자 붙임·공백 처리 차이로 줄이 바뀌지 않게) */
+.box-area .ProseMirror { white-space: pre-wrap; font-variant-ligatures: normal; font-feature-settings: normal; }
+.box-area.editing, .box-area.nowheel { overflow-y: auto; }
+.box-area > .box-text { flex: none; }
+.box-area.va-middle > .box-text { margin-block: auto; }
+.box-area.va-bottom > .box-text { margin-top: auto; }
+/* 아래에 글이 더 있으면 흐리게 */
+.box-area.more { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent); }
+.box-area.editing { cursor: text; }
+/* 고르기만 한 상자: 편집기는 떠 있지만 커서는 숨기고 누르기·끌기는 상자가 받는다 (링크만 눌린다) */
+.box-area.ready .ProseMirror { caret-color: transparent; pointer-events: none; }
+.box-area.ready .ProseMirror a { pointer-events: auto; }
+.box-area:not(.editing) .is-editor-empty::before { display: none; }
+/* 재는 중(크기가 아직 없는 상자): 글 크기대로 */
+.box-area.auto { display: block; left: 50%; top: 50%; transform: translate(-50%, -50%); width: max-content; min-width: 24px; overflow: visible; }
+.box-area.auto.memo { left: 14px; top: 14px; transform: none; }
 .box-empty { width: 72px; height: 18px; }
-.box-title { font-size: 15px; font-weight: 600; line-height: 1.38; letter-spacing: -0.005em; }
-.box-body { line-height: 1.5; opacity: 0.86; }
-.box-title:not(:empty) + .box-body:not(:empty) { margin-top: 3px; }
-.editing .box-title + .box-body { margin-top: 3px; }
+.box-text { line-height: 1.5; }
+/* 서식: 첫 줄을 제목으로 */
+.box-text.head .ProseMirror > :first-child { font-size: 15px; font-weight: 600; line-height: 1.38; letter-spacing: -0.005em; }
+.box-text.head .ProseMirror > :first-child:not(:only-child) {
+  padding-bottom: 4px; margin-bottom: 4px; border-bottom: 1px solid color-mix(in srgb, var(--ink) 22%, transparent);
+}
+.box-text.head .ProseMirror > :not(:first-child) { font-size: 13px; opacity: 0.86; }
+/* 서식: 상자 안 바탕 무늬 (글과 함께 스크롤) */
+.box-area.rule-lines { background-image: linear-gradient(to bottom, transparent 23px, var(--rule) 23px, var(--rule) 24px); background-size: 100% 24px; background-attachment: local; }
+.box-area.rule-lines .box-text { line-height: 24px; }
+.box-area.rule-lines .box-text.head .ProseMirror > :first-child { line-height: 24px; padding: 0; margin: 0; border: 0; }
+.box-area.rule-grid { background-image: linear-gradient(var(--rule) 1px, transparent 1px), linear-gradient(90deg, var(--rule) 1px, transparent 1px); background-size: 12px 12px; background-attachment: local; }
+.box-area.rule-dots { background-image: radial-gradient(circle, var(--rule) 1px, transparent 1.4px); background-size: 12px 12px; background-attachment: local; }
 
 .rich p { margin: 0; min-height: 1em; }
 .rich ul, .rich ol { margin: 0; padding-left: 1.25em; text-align: left; }
@@ -285,7 +319,7 @@ a { color: inherit; text-decoration: none; }
 .rich ul[data-type='taskList'] li > div { flex: 1; }
 .rich ul[data-type='taskList'] li[data-checked='true'] > div { text-decoration: line-through; opacity: 0.55; }
 .rich input[type='checkbox'] { accent-color: var(--accent); margin: 0; }
-.box-content:not(.editing) input[type='checkbox'] { pointer-events: none; }
+.box-area:not(.editing) input[type='checkbox'] { pointer-events: none; }
 .rich a { color: inherit; text-decoration: underline; text-underline-offset: 2px; text-decoration-thickness: 1px; cursor: pointer; }
 .ProseMirror { outline: none; }
 .ProseMirror .is-editor-empty:first-child::before { content: attr(data-placeholder); float: left; height: 0; width: 100%; pointer-events: none; opacity: 0.35; }
@@ -349,20 +383,11 @@ mark.hl { background: var(--hl); color: inherit; border-radius: 2px; padding: 0 
 .edge-label.rel-only { justify-content: center; width: 22px; height: 22px; padding: 0; border-radius: 50%; }
 .edge-label.rel-only .edge-rel { margin: 0; }
 
-/* 집합: 바깥 상자의 글은 위쪽 머리글로 */
-.box.set .box-content { transform: translateX(-50%); }
-/* 틀이 움직이는 동안 예전 자리에서 새 자리로 (BoxNode의 useFrameMotion이 값을 바꾼다) */
-.box-shape { translate: var(--fx, 0) var(--fy, 0); }
-.box-content { translate: var(--cx, 0) var(--cy, 0); }
 .box-drop { animation: fade-in 0.15s ease; }
 @keyframes fade-in { from { opacity: 0; } }
 
-/* 메모지: 왼쪽 위부터 쓰는 종이, 줄 메모지는 줄 간격에 글줄을 맞춘다 */
-.box.memo .box-content { left: 14px; top: 14px; transform: none; text-align: left; }
-.box.memo .box-title, .box.memo .box-body { line-height: 24px; }
-.box.memo .box-title { font-size: 15px; }
-.box.memo .box-title:not(:empty) + .box-body:not(:empty), .box.memo .editing .box-title + .box-body { margin-top: 0; }
-.box.memo .box-body { opacity: 0.9; }
+/* 메모지: 왼쪽 위부터 쓰는 종이 */
+.box.memo .box-area { text-align: left; }
 .box.memo .box-main { filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.08)) drop-shadow(0 6px 12px rgba(0, 0, 0, 0.08)); }
 .react-flow.dark .box.memo .box-main { filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.5)); }
 
@@ -525,7 +550,6 @@ mark.hl { background: var(--hl); color: inherit; border-radius: 2px; padding: 0 
 .card .thumb { transition: border-color 0.15s, box-shadow 0.2s, transform 0.2s var(--ease); }
 .card:hover .thumb { transform: translateY(-2px); }
 .card:active .thumb { transform: scale(0.98); }
-.box-halo { animation: fade-in 0.15s; }
 .empty-note, .empty { animation: rise 0.4s var(--ease); }
 @keyframes rise { from { opacity: 0; transform: translate(var(--rx, 0), 8px); } }
 .empty-note { --rx: -50%; }

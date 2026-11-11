@@ -78,6 +78,19 @@ export function Segmented<T extends string>({ value, options, onChange }: { valu
   )
 }
 
+/**
+ * 메뉴·팝업을 닫으면 고른 상자로 포커스를 돌려준다 (그대로 타자를 치면 그 상자 글 끝에 써지게).
+ * 편집 중이던 상자는 커서 자리를 그대로 둔다
+ */
+export const backToBox = (e: Event) => {
+  e.preventDefault()
+  const editing = document.querySelector<HTMLElement>('.box-area.editing .ProseMirror')
+  if (editing) return editing.focus({ preventScroll: true })
+  const ready = document.querySelector<HTMLElement & { editor?: { commands: { focus: (at: 'end', o: { scrollIntoView: boolean }) => boolean } } }>('.box-area.ready .ProseMirror')
+  if (ready?.editor) ready.editor.commands.focus('end', { scrollIntoView: false })
+  else ready?.focus({ preventScroll: true })
+}
+
 export function Menu({ trigger, children, align = 'start', open, onOpenChange }: {
   trigger: ReactNode; children: ReactNode; align?: 'start' | 'end' | 'center'; open?: boolean; onOpenChange?: (o: boolean) => void
 }) {
@@ -85,7 +98,7 @@ export function Menu({ trigger, children, align = 'start', open, onOpenChange }:
     <DropdownMenu.Root modal={false} open={open} onOpenChange={onOpenChange}>
       <DropdownMenu.Trigger asChild>{trigger}</DropdownMenu.Trigger>
       <DropdownMenu.Portal>
-        <DropdownMenu.Content className="menu" align={align} sideOffset={6} collisionPadding={8} onCloseAutoFocus={(e) => e.preventDefault()}>
+        <DropdownMenu.Content className="menu" align={align} sideOffset={6} collisionPadding={8} onCloseAutoFocus={backToBox}>
           {children}
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
@@ -117,7 +130,7 @@ export function Pop({ trigger, children }: { trigger: ReactNode; children: React
     <Popover.Root>
       <Popover.Trigger asChild>{trigger}</Popover.Trigger>
       <Popover.Portal>
-        <Popover.Content className="pop" sideOffset={6} collisionPadding={8} onOpenAutoFocus={(e) => e.preventDefault()} onCloseAutoFocus={(e) => e.preventDefault()}>
+        <Popover.Content className="pop" sideOffset={6} collisionPadding={8} onOpenAutoFocus={(e) => e.preventDefault()} onCloseAutoFocus={backToBox}>
           {children}
         </Popover.Content>
       </Popover.Portal>

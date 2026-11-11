@@ -1,6 +1,7 @@
 // 노트 내보내기
 // 그림: html-to-image (React Flow 공식 문서가 권하는 방식) → PNG / SVG
 // 코드: Mermaid(직접 생성), Graphviz DOT(ts-graphviz의 toDot), AI용 개요(글)
+import { boxParts } from './boxtext'
 import { colorName } from './color'
 import { hierarchy } from './sets'
 import type { EdgeAttributesObject, NodeAttributesObject, SubgraphAttributesObject } from 'ts-graphviz'
@@ -33,7 +34,9 @@ function lines(html: string): string[] {
   block(new DOMParser().parseFromString(html.replace(/<br\s*\/?>/gi, '\n'), 'text/html').body, '')
   return out
 }
-const textOf = (n: BoxNode) => [...lines(n.data.title), ...lines(n.data.body)]
+/** 상자 글을 제목 줄(제목 줄 서식일 때)과 나머지로 */
+const parts = (n: BoxNode) => boxParts(n.data)
+const textOf = (n: BoxNode) => [...lines(parts(n).title), ...lines(parts(n).body)]
 const firstColor = (html: string) => html.match(/data-tc="(#[0-9A-Fa-f]{6})"/)?.[1]
 /** 선 라벨 앞에 관계 기호를 붙인다 (가져올 때 다시 떼어 낸다) */
 const edgeText = (d: EdgeData) => [d.rel, d.label].filter(Boolean).join(' ')
@@ -52,8 +55,8 @@ const MM_SHAPE: Record<Shape, [string, string]> = {
 const mq = (s: string) => s.replace(/"/g, '#quot;').replace(/</g, '#60;').replace(/>/g, '#62;').replace(/\|/g, '#124;')
 /** 제목은 <b>로 감싸 설명과 구분한다 (가져올 때도 이걸 보고 제목을 나눈다) */
 const mmLabel = (n: BoxNode) => {
-  const t = lines(n.data.title).map(mq)
-  return [t.length ? `<b>${t.join('<br>')}</b>` : '', ...lines(n.data.body).map(mq)].filter(Boolean).join('<br>') || ' '
+  const t = lines(parts(n).title).map(mq)
+  return [t.length ? `<b>${t.join('<br>')}</b>` : '', ...lines(parts(n).body).map(mq)].filter(Boolean).join('<br>') || ' '
 }
 
 /** Claude·ChatGPT, Notion·GitHub·Obsidian이 읽을 수 있는 Mermaid flowchart */
@@ -91,7 +94,7 @@ export function toMermaid(nodes: BoxNode[], edges: LogicEdge[]): string {
     else if (d.stroke) st.push(`stroke:${d.stroke}`)
     if (d.strokeWidth !== 1.5) st.push(`stroke-width:${d.strokeWidth}px`)
     if (d.dash === 'dashed') st.push('stroke-dasharray:5 4')
-    const c = firstColor(d.title)
+    const c = firstColor(parts(n).title || d.body)
     if (c) st.push(`color:${c}`)
     if (st.length) out.push(`  style ${id.get(n.id)} ${st.join(',')}`)
   }
@@ -108,9 +111,9 @@ const defined = <T extends object>(o: T) => Object.fromEntries(Object.entries(o)
 const hq = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 /** HTML 라벨: 제목은 <B>, 줄바꿈은 <BR/> */
 const dotLabel = (n: BoxNode) => {
-  const t = lines(n.data.title).map(hq)
-  const parts = [t.length ? `<B>${t.join('<BR/>')}</B>` : '', ...lines(n.data.body).map(hq)].filter(Boolean)
-  return parts.length ? `<${parts.join('<BR/>')}>` : ' '
+  const p = parts(n), t = lines(p.title).map(hq)
+  const all = [t.length ? `<B>${t.join('<BR/>')}</B>` : '', ...lines(p.body).map(hq)].filter(Boolean)
+  return all.length ? `<${all.join('<BR/>')}>` : ' '
 }
 
 export async function toDotCode(nodes: BoxNode[], edges: LogicEdge[]): Promise<string> {
@@ -136,10 +139,10 @@ export async function toDotCode(nodes: BoxNode[], edges: LogicEdge[]): Promise<s
       for (const c of cs) make(sub, byId.get(c)!)
       return
     }
-    const style = [d.shape === 'round' && 'rounded', d.fill && 'filled', d.dash === 'dashed' && 'dashed'].filter(Boolean).join(',')
+    const style = [d.fill && 'filled', d.dash === 'dashed' && 'dashed'].filter(Boolean).join(',')
     made.set(n.id, parent.createNode(name.get(n.id)!, defined({
       label: dotLabel(n), shape: DOT_SHAPE[d.shape], style: style || undefined,
-      fillcolor: d.fill ?? undefined, color: d.stroke ?? undefined, fontcolor: firstColor(d.title),
+      fillcolor: d.fill ?? undefined, color: d.stroke ?? undefined, fontcolor: firstColor(parts(n).title || d.body),
       penwidth: d.dash === 'none' ? 0 : d.strokeWidth !== 1.5 ? d.strokeWidth : undefined,
     }) as unknown as NodeAttributesObject))
   }
@@ -184,9 +187,9 @@ export function toOutline(title: string, nodes: BoxNode[], edges: LogicEdge[]): 
   }
 
   const name = (n: BoxNode) => {
-    const ti = lines(n.data.title).join(' ')
+    const ti = lines(parts(n).title).join(' ')
     if (ti) return ti
-    const b = lines(n.data.body)[0]
+    const b = lines(parts(n).body)[0]
     return b ? (b.length > 40 ? b.slice(0, 40) + '…' : b) : t('(빈 상자)')
   }
   const edgeMeta = (e: LogicEdge) => {
@@ -236,7 +239,7 @@ export function toOutline(title: string, nodes: BoxNode[], edges: LogicEdge[]): 
 
   const details: string[] = []
   for (const n of [...nodes].sort((a, b) => num.get(a.id)! - num.get(b.id)!)) {
-    const d = n.data, ti = lines(d.title).join(' '), body = lines(d.body), tc = firstColor(d.title)
+    const d = n.data, ti = lines(parts(n).title).join(' '), body = lines(parts(n).body), tc = firstColor(parts(n).title || d.body)
     const tags = [
       SHAPE_NAME[d.shape], d.fill && t('{{color}} 채움', { color: colorName(d.fill) }), d.dash !== 'none' && d.stroke && t('{{color}} 테두리', { color: colorName(d.stroke) }),
       d.dash === 'dashed' && t('점선 테두리'), d.dash === 'none' && t('테두리 없음'), tc && t('글자 {{color}}', { color: colorName(tc) }),

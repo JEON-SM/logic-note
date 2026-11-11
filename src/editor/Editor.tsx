@@ -10,7 +10,7 @@ import { db, freshNotes, purgeNote, updateNote } from '../lib/db'
 import { isUrl } from '../lib/media'
 import { go, setSettings, useTheme } from '../lib/store'
 import { pageSize, pagesSize } from '../lib/pages'
-import { isMemo } from '../lib/shapes'
+import { boxSize } from '../lib/shapes'
 import { remoteEvents } from '../lib/sync'
 import type { Bg, LogicEdge as LogicEdgeT } from '../lib/types'
 import { ColorPanel, IB, Item, Menu, MenuSep, Pop, Segmented, cls } from '../ui/kit'
@@ -27,9 +27,9 @@ import { PageIndicator, PageSorter, PagesLayer, openPages } from './Pages'
 import { usePageNav, usePageWheel, useSnapToPage } from './pageNav'
 import { usePortMoving, usePortPlacing } from './ports'
 import {
-  CLIP_MARK, addBox, addLink, canHold, commit, copySelection, cutSelection, dragOver, effDefaults, finishDrag, flushSave, groupSelection, hasClip,
-  loadNote, moveInto, onEdgesChange, onNodesChange, paperKind, pasteClip, redo, selectedNodes, setPageSide, setPaper, startDrag, startEditing, stopEditing, takeOut,
-  undo, useEd, useLook, type PaperKind,
+  CLIP_MARK, addBox, addLink, canHold, commit, copySelection, cutSelection, dragOver, drawBox, effDefaults, finishDrag, flushSave, fmt, groupSelection, hasClip,
+  loadNote, moveInto, notePointer, nudge, onEdgesChange, onNodesChange, paintOnto, paperKind, pasteClip, redo, selectOnly, selectToward, setFree, setPageSide, setPaper,
+  snapCenter, snapXY, startDrag, startEditing, stopEditing, takeOut, undo, useEd, useLook, type PaperKind,
 } from './store'
 import { t } from '../lib/i18n'
 
@@ -49,7 +49,8 @@ const PAPERS: { id: PaperKind; label: string; icon: React.ReactNode }[] = [
   { id: 'a4', label: t('A4 세로'), icon: <RectangleVertical size={15} /> },
   { id: 'a4-land', label: t('A4 가로'), icon: <RectangleHorizontal size={15} /> },
 ]
-const isEditable = (t: EventTarget | null) => t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))
+/** 글을 쓰는 곳인지. 고르기만 한 상자의 미리 띄운 편집기는 아니다 (단축키는 캔버스가 받는다) */
+const isEditable = (t: EventTarget | null) => t instanceof HTMLElement && !t.closest('.box-area.ready') && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))
 const OPPOSITE: Record<string, string> = { t: 'b', b: 't', l: 'r', r: 'l' }
 const openIds = new Set<string>()
 
@@ -175,9 +176,9 @@ function Canvas({ id, viewport }: { id: string; viewport?: Viewport }) {
   const look = useLook(), theme = look.theme
   const rf = useReactFlow()
   const wrap = useRef<HTMLDivElement>(null)
-  const { nodes, edges, bg, tool, shape, paper, picking, porting, edgeKind } = useEd(useShallow((s) => ({
-    nodes: s.nodes, edges: s.edges, bg: s.bg, tool: s.tool, shape: s.shape, paper: s.paper, picking: s.picking,
-    porting: !!s.portDraft, edgeKind: s.edgeStyle.kind,
+  const { nodes, edges, bg, tool, paper, picking, porting, painting, edgeKind } = useEd(useShallow((s) => ({
+    nodes: s.nodes, edges: s.edges, bg: s.bg, tool: s.tool, paper: s.paper, picking: s.picking,
+    porting: !!s.portDraft, painting: !!s.painter, edgeKind: s.edgeStyle.kind,
   })))
   const onPortDouble = usePortPlacing(), onPortPress = usePortMoving()
   const [fitOnOpen] = useState(() => !viewport && nodes.length > 0 && !useEd.getState().paper)
@@ -191,6 +192,13 @@ function Canvas({ id, viewport }: { id: string; viewport?: Viewport }) {
   const toPage = usePageNav()
   const snap = useSnapToPage()
   usePageWheel(wrap, !!paper)
+  /** 스페이스를 누르고 있는 동안은 끌어서 화면 이동 */
+  const [space, setSpace] = useState(false)
+  /** Shift를 누르고 있으면 빈 곳을 끌어 여러 개 고르기 */
+  const [shift, setShift] = useState(false)
+  /** 끌어서 그리는 중인 상자 (화면 좌표) */
+  const [draft, setDraft] = useState<{ x: number; y: number; w: number; h: number; label: string } | null>(null)
+  const drawingRef = useRef(false)
 
   const center = useCallback(() => {
     const r = wrap.current!.getBoundingClientRect()
@@ -199,27 +207,57 @@ function Canvas({ id, viewport }: { id: string; viewport?: Viewport }) {
   useEffect(() => setCenterFn(center), [center])
   useEffect(() => setFitFn((ids) => rf.fitView({ nodes: ids.map((id) => ({ id })), padding: 0.2, duration: 300, maxZoom: 1 })), [rf])
 
+  /** 방향키로 고른 상자가 화면 밖이면 그쪽으로 */
+  const reveal = useCallback((nid: string) => {
+    const n = useEd.getState().nodes.find((x) => x.id === nid), el = wrap.current
+    if (!n || !el) return
+    const r = el.getBoundingClientRect(), p = rf.flowToScreenPosition(n.position)
+    if (p.x < r.left + 40 || p.x > r.right - 40 || p.y < r.top + 40 || p.y > r.bottom - 40) rf.setCenter(n.position.x, n.position.y, { zoom: rf.getZoom(), duration: 200 })
+  }, [rf])
+
   // 단축키 · 붙여넣기
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Alt') setFree(true)
+      if (e.key === 'Shift') setShift(true)
       if (isEditable(e.target)) return
-      const mod = e.ctrlKey || e.metaKey, k = e.key.toLowerCase()
+      const mod = e.ctrlKey || e.metaKey, k = e.key.toLowerCase(), st = useEd.getState()
+      const sel = st.nodes.filter((n) => n.selected)
+      if (e.key === ' ') { e.preventDefault(); if (!e.repeat) setSpace(true); return }
       if (mod && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo() }
       else if (mod && k === 'y') { e.preventDefault(); redo() }
       else if (mod && k === 'c') { if (copySelection()) navigator.clipboard?.writeText(CLIP_MARK).catch(() => {}) }
       else if (mod && k === 'x') { if (cutSelection()) navigator.clipboard?.writeText(CLIP_MARK).catch(() => {}) }
       else if (mod && k === 'd') { e.preventDefault(); if (copySelection()) pasteClip() }
-      else if (mod && k === 'a') { e.preventDefault(); useEd.setState((s) => ({ nodes: s.nodes.map((n) => ({ ...n, selected: true })) })) }
-      else if (mod && k === 'g') { e.preventDefault(); e.shiftKey ? takeOut(selectedNodes().map((n) => n.id)) : groupSelection() }
-      else if (e.key === 'Tab') { e.preventDefault(); addChild() }
-      else if (e.key === 'Enter') {
-        const sel = useEd.getState().nodes.filter((n) => n.selected)
-        if (sel.length === 1) { e.preventDefault(); startEditing(sel[0].id) }
+      else if (mod && k === 'a') { e.preventDefault(); useEd.setState((s) => ({ nodes: s.nodes.map((n) => (n.selected ? n : { ...n, selected: true })) })) }
+      else if (mod && k === 'g') { e.preventDefault(); e.shiftKey ? takeOut(sel.map((n) => n.id)) : groupSelection() }
+      // 글을 편집하지 않을 때 Ctrl+B·I·U는 고른 상자 글 전체에 (엑셀처럼)
+      else if (mod && (k === 'b' || k === 'i' || k === 'u') && sel.length) {
+        e.preventDefault()
+        fmt((c) => (k === 'b' ? c.toggleBold() : k === 'i' ? c.toggleItalic() : c.toggleUnderline()))
+      } else if (e.key === 'Tab') { e.preventDefault(); addChild() }
+      else if ((e.key === 'Enter' || e.key === 'F2') && sel.length === 1) { e.preventDefault(); startEditing(sel[0].id) }
+      else if (e.key === 'Delete' || e.key === 'Backspace') {
+        const ed = st.edges.filter((x) => x.selected)
+        if (sel.length || ed.length) { e.preventDefault(); rf.deleteElements({ nodes: sel.map((n) => ({ id: n.id })), edges: ed.map((x) => ({ id: x.id })) }) }
+      } else if (ARROWS[e.key] && !mod) {
+        e.preventDefault()
+        const [dx, dy, dir] = ARROWS[e.key]
+        // Alt+방향키: 1px씩, Alt+Shift: 한 칸씩 옮기기. 방향키만: 그쪽 상자로 이동
+        if (e.altKey) nudge(dx * (e.shiftKey ? 24 : 1), dy * (e.shiftKey ? 24 : 1))
+        else { const nid = selectToward(dir); if (nid) reveal(nid) }
       } else if (e.key === 'Escape') {
-        if (useEd.getState().picking) return useEd.setState({ picking: null, dropTarget: null })
-        useEd.setState((s) => ({ tool: s.tool === 'place' ? 'hand' : s.tool, nodes: s.nodes.map((n) => (n.selected ? { ...n, selected: false } : n)) }))
+        if (st.painter) return useEd.setState({ painter: null })
+        if (st.picking) return useEd.setState({ picking: null, dropTarget: null })
+        useEd.setState((s) => ({ tool: s.tool === 'place' ? 'draw' : s.tool, nodes: s.nodes.map((n) => (n.selected ? { ...n, selected: false } : n)) }))
       }
     }
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === ' ') setSpace(false)
+      if (e.key === 'Alt') setFree(false)
+      if (e.key === 'Shift') setShift(false)
+    }
+    const onBlur = () => { setSpace(false); setFree(false); setShift(false) }
     const onPaste = (e: ClipboardEvent) => {
       if (isEditable(e.target)) return
       const files = [...(e.clipboardData?.files ?? [])]
@@ -232,15 +270,17 @@ function Canvas({ id, viewport }: { id: string; viewport?: Viewport }) {
       else if (text.trim()) insertText(text)
     }
     addEventListener('keydown', onKey)
+    addEventListener('keyup', onKeyUp)
+    addEventListener('blur', onBlur)
     addEventListener('paste', onPaste)
-    return () => { removeEventListener('keydown', onKey); removeEventListener('paste', onPaste) }
-  }, [])
+    return () => { removeEventListener('keydown', onKey); removeEventListener('keyup', onKeyUp); removeEventListener('blur', onBlur); removeEventListener('paste', onPaste) }
+  }, [rf, reveal])
 
   const toFlow = (x: number, y: number) => rf.screenToFlowPosition({ x, y })
 
   const onConnect = useCallback((c: Connection) => addLink(c.source, c.sourceHandle ?? 'r', c.target, c.targetHandle ?? 'l'), [])
 
-  // 빈 곳에 놓으면 새 상자, 상자 위에 놓으면 가장 가까운 쪽에 연결
+  // 빈 곳에 놓으면 새 상자(처음 상자와 같은 크기), 상자 위에 놓으면 가장 가까운 쪽에 연결
   const onConnectEnd = useCallback((e: MouseEvent | TouchEvent, cs: FinalConnectionState) => {
     if (cs.isValid || !cs.fromNode) return
     const pt = 'changedTouches' in e ? e.changedTouches[0] : e
@@ -254,10 +294,12 @@ function Canvas({ id, viewport }: { id: string; viewport?: Viewport }) {
       if (target.id !== from.id) addLink(from.id, fh, target.id, side)
       return
     }
-    const off = { l: [60, 0], r: [-60, 0], t: [0, 24], b: [0, -24] }[side]!
-    const nid = addBox({ x: pos.x + off[0], y: pos.y + off[1] }, useEd.getState().nodes.find((n) => n.id === from.id)?.data.shape ?? 'rect')
+    const src = useEd.getState().nodes.find((n) => n.id === from.id)
+    const w = src?.data.w ?? 144, h = src?.data.h ?? 48
+    const off = { l: [w / 2, 0], r: [-w / 2, 0], t: [0, h / 2], b: [0, -h / 2] }[side]!
+    const nid = addBox({ x: pos.x + off[0], y: pos.y + off[1] }, src?.data.shape ?? 'rect', { w, h, fill: src?.data.fill ?? null, stroke: src?.data.stroke ?? null })
     addLink(from.id, fh, nid, side ?? OPPOSITE[fh], false)
-    startEditing(nid)
+    startEditing(nid, undefined, false)
   }, [rf])
 
   const onReconnect = useCallback((old: LogicEdgeT, c: Connection) => {
@@ -265,30 +307,88 @@ function Canvas({ id, viewport }: { id: string; viewport?: Viewport }) {
     useEd.setState((s) => ({ edges: reconnectEdge(old, c, s.edges, { shouldReplaceId: false }), rev: s.rev + 1 }))
   }, [])
 
-  // 메모지는 한 번 놓고 나면 다시 보통 상자로 (두 번 눌러 만드는 건 늘 상자)
-  const placed = (nid: string) => {
-    useEd.setState({ tool: 'hand', ...(isMemo(shape) && { shape: effDefaults().shape }) })
-    startEditing(nid)
+  /**
+   * 누르는 순간: 상자는 바로 고르고(놓을 때까지 기다리지 않는다), 빈 곳을 끌면 상자를 그린다.
+   * 도형을 고른 상태(place)면 상자 위에서도 그려서 그 상자 안에 넣는다
+   */
+  const onPointerDownCapture = (e: React.PointerEvent) => {
+    notePointer(e.pointerType)
+    setFree(e.altKey)
+    const s = useEd.getState(), target = e.target as HTMLElement
+    if (e.button !== 0 || space || s.picking || s.portDraft) return
+    const nodeEl = target.closest<HTMLElement>('.react-flow__node')
+    const place = s.tool === 'place'
+    if (nodeEl && !place) {
+      const nid = nodeEl.dataset.id!
+      const n = s.nodes.find((x) => x.id === nid)
+      if (!n || target.closest('.react-flow__handle')) return
+      if (s.editingId && s.editingId !== nid) stopEditing()
+      if (e.shiftKey || e.ctrlKey || e.metaKey) {
+        // Shift·Ctrl+클릭: 안 고른 상자는 누르는 순간 더하고, 고른 상자는 끌지 않고 떼면 뺀다
+        const x0 = e.clientX, y0 = e.clientY
+        if (!n.selected) useEd.setState((st) => ({ nodes: st.nodes.map((x) => (x.id === nid ? { ...x, selected: true } : x)) }))
+        const onClick = (ev: MouseEvent) => {
+          ev.stopPropagation()
+          if (n.selected && Math.hypot(ev.clientX - x0, ev.clientY - y0) < 4) useEd.setState((st) => ({ nodes: st.nodes.map((x) => (x.id === nid ? { ...x, selected: false } : x)) }))
+        }
+        addEventListener('click', onClick, { capture: true, once: true })
+        setTimeout(() => removeEventListener('click', onClick, { capture: true }), 1500)
+        return
+      }
+      if (!n.selected) selectOnly([nid])
+      return
+    }
+    if (e.pointerType === 'touch') return
+    const onPane = target.classList.contains('react-flow__pane')
+    if (!(place ? !target.closest('button, .react-flow__handle, .react-flow__resize-control, .edge-label') : s.tool === 'draw' && onPane && !e.shiftKey)) return
+    if (s.painter) return
+    e.stopPropagation()
+    drawingRef.current = true
+    const x0 = e.clientX, y0 = e.clientY, shape = place ? s.shape : effDefaults().shape
+    let moved = false
+    const flowRect = (x1: number, y1: number) => {
+      const a = snapXY(toFlow(Math.min(x0, x1), Math.min(y0, y1))), b = snapXY(toFlow(Math.max(x0, x1), Math.max(y0, y1)))
+      return { x: a.x, y: a.y, w: Math.max(24, b.x - a.x), h: Math.max(24, b.y - a.y) }
+    }
+    const move = (ev: PointerEvent) => {
+      setFree(ev.altKey)
+      if (!moved && Math.hypot(ev.clientX - x0, ev.clientY - y0) < 5) return
+      moved = true
+      const r = flowRect(ev.clientX, ev.clientY), p = rf.flowToScreenPosition({ x: r.x, y: r.y }), z = rf.getZoom()
+      setDraft({ x: p.x, y: p.y, w: r.w * z, h: r.h * z, label: `${Math.round(r.w)} × ${Math.round(r.h)}` })
+    }
+    const swallow = (ev: Event) => { ev.stopPropagation(); ev.preventDefault() }
+    const up = (ev: PointerEvent) => {
+      removeEventListener('pointermove', move, true)
+      removeEventListener('pointerup', up, true)
+      drawingRef.current = false
+      setDraft(null)
+      if (!moved && !place) return
+      // 그린 뒤 따라오는 클릭이 방금 만든 상자의 선택을 풀지 않게
+      addEventListener('click', swallow, { capture: true, once: true })
+      setTimeout(() => removeEventListener('click', swallow, { capture: true }), 0)
+      let r = flowRect(ev.clientX, ev.clientY)
+      if (!moved) {
+        // 도형만 고르고 눌렀으면 그 자리에 기본 크기로
+        const sz = boxSize(shape), c = snapCenter(toFlow(ev.clientX, ev.clientY), sz.w, sz.h)
+        r = { x: c.x - sz.w / 2, y: c.y - sz.h / 2, ...sz }
+      }
+      drawBox(r, shape)
+      if (place) useEd.setState({ tool: 'draw', shape: effDefaults().shape })
+    }
+    addEventListener('pointermove', move, true)
+    addEventListener('pointerup', up, true)
   }
-  const onPaneClick = (e: React.MouseEvent) => {
-    useEd.setState({ editingEdge: null })
+  // 그리는 중에는 React Flow가 상자를 끌지 않게
+  const onMouseDownCapture = (e: React.MouseEvent) => {
+    if (drawingRef.current) { e.stopPropagation(); return }
+    onPortPress(e)
+  }
+
+  const onPaneClick = () => {
+    useEd.setState({ editingEdge: null, painter: null })
     if (useEd.getState().picking) return useEd.setState({ picking: null, dropTarget: null })
     if (useEd.getState().editingId) return stopEditing()
-    if (tool === 'place') placed(addBox(toFlow(e.clientX, e.clientY), shape))
-  }
-  const onDoubleClick = (e: React.MouseEvent) => {
-    if (!(e.target as HTMLElement).classList.contains('react-flow__pane')) return
-    startEditing(addBox(toFlow(e.clientX, e.clientY), isMemo(shape) ? effDefaults().shape : shape))
-  }
-  // 집합 안의 빈 곳을 두 번 누르거나, 도형을 고른 채 상자를 누르면 그 안에 새 상자
-  const addInside = (e: React.MouseEvent, parent: string) => {
-    if (!canHold(parent, [])) return
-    placed(addBox(toFlow(e.clientX, e.clientY), tool === 'place' ? shape : isMemo(shape) ? effDefaults().shape : shape, { parent }))
-  }
-  const onNodeDoubleClick = (e: React.MouseEvent, id: string) => {
-    const onText = (e.target as HTMLElement).closest('.box-content')
-    if (useEd.getState().frames[id] && !onText) addInside(e, id)
-    else startEditing(id)
   }
   const onDrop = async (e: DragEvent) => {
     e.preventDefault()
@@ -307,7 +407,9 @@ function Canvas({ id, viewport }: { id: string; viewport?: Viewport }) {
   const ps = paper && pageSize(paper)
   return (
     <CanvasMenu>
-    <div className={`canvas tool-${tool}${picking ? ' picking' : ''}${paper ? ' paper' : ''}${porting ? ' porting' : ''}`} ref={wrap} onMouseDownCapture={onPortPress} onDoubleClickCapture={onPortDouble} onDoubleClick={onDoubleClick} onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
+    <div className={cls('canvas', `tool-${tool}`, picking && 'picking', paper && 'paper', porting && 'porting', painting && 'painting', space && 'spacing')} ref={wrap}
+      onPointerDownCapture={onPointerDownCapture} onMouseDownCapture={onMouseDownCapture} onDoubleClickCapture={onPortDouble}
+      onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
       <ReactFlow
         nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes}
         onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} onConnectEnd={onConnectEnd} onReconnect={onReconnect}
@@ -315,10 +417,13 @@ function Canvas({ id, viewport }: { id: string; viewport?: Viewport }) {
         connectionLineType={edgeKind === 'straight' ? ConnectionLineType.Straight : edgeKind === 'step' ? ConnectionLineType.SmoothStep : ConnectionLineType.Bezier}
         defaultViewport={startView} fitView={fitOnOpen} fitViewOptions={{ padding: 0.25, maxZoom: 1 }}
         translateExtent={ps ? [[-ps.w * 1.5, -ps.h], [pagesSize(paper!).w + ps.w * 1.5, pagesSize(paper!).h + ps.h]] : undefined}
-        nodesDraggable={!picking}
-        panOnDrag={tool === 'select' ? [1] : true} selectionOnDrag={tool === 'select'} selectionMode={SelectionMode.Partial}
-        panOnScroll={false} zoomOnDoubleClick={false} minZoom={0.1} maxZoom={4}
-        deleteKeyCode={['Backspace', 'Delete']} multiSelectionKeyCode={['Shift', 'Meta', 'Control']}
+        nodesDraggable={!picking && tool !== 'place'}
+        // 엑셀처럼: 휠은 위아래, Shift+휠은 옆으로, Ctrl+휠은 확대·축소. 끌어서 이동은 손 도구·스페이스·가운데 버튼
+        panOnScroll panOnDrag={tool === 'hand' || space ? true : [1]} panActivationKeyCode={null}
+        selectionOnDrag={(tool === 'select' || shift) && !space} selectionKeyCode={null} selectionMode={SelectionMode.Partial}
+        zoomOnDoubleClick={false} minZoom={0.1} maxZoom={4}
+        // 여러 개 고르기(Shift·Ctrl+클릭)는 누르는 순간 직접 처리한다
+        deleteKeyCode={null} multiSelectionKeyCode={null}
         onBeforeDelete={async () => { commit(); return true }}
         elevateNodesOnSelect={false}
         onNodeDragStart={(_, __, ns) => startDrag(ns.map((n) => n.id))}
@@ -327,12 +432,12 @@ function Canvas({ id, viewport }: { id: string; viewport?: Viewport }) {
         onSelectionDragStart={(_, ns) => startDrag(ns.map((n) => n.id))}
         onSelectionDrag={(_, ns) => ns[0] && dragOver(ns[0].id)}
         onSelectionDragStop={(_, ns) => finishDrag(ns.map((n) => n.id))}
-        onNodeDoubleClick={(e, n) => onNodeDoubleClick(e, n.id)}
-        onNodeClick={(e, n) => {
-          const pick = useEd.getState().picking
-          if (pick) return canHold(n.id, pick) ? moveInto(pick, n.id) : toast(t('여기에는 넣을 수 없어요'))
-          if (tool === 'place') return addInside(e, n.id)
-          if (useEd.getState().editingId !== n.id) stopEditing()
+        onNodeDoubleClick={(e, n) => startEditing(n.id, { x: e.clientX, y: e.clientY })}
+        onNodeClick={(_, n) => {
+          const st = useEd.getState()
+          if (st.picking) return canHold(n.id, st.picking) ? moveInto(st.picking, n.id) : toast(t('여기에는 넣을 수 없어요'))
+          if (st.painter) return paintOnto(n.id)
+          if (st.editingId !== n.id) stopEditing()
         }}
         onNodeMouseEnter={(_, n) => { const pick = useEd.getState().picking; if (pick) useEd.setState({ dropTarget: canHold(n.id, pick) ? n.id : null }) }}
         onNodeMouseLeave={() => { if (useEd.getState().picking) useEd.setState({ dropTarget: null }) }}
@@ -348,9 +453,14 @@ function Canvas({ id, viewport }: { id: string; viewport?: Viewport }) {
         {!pattern && <Background variant={BackgroundVariant.Dots} gap={1000} size={0} bgColor={paper ? DESK[theme] : look.ground} />}
         {paper && <PagesLayer paper={paper} bg={bg} />}
       </ReactFlow>
+      {draft && (
+        <div className="draw-rect" style={{ left: draft.x, top: draft.y, width: draft.w, height: draft.h }}>
+          <span className="draw-size">{draft.label}</span>
+        </div>
+      )}
       {!nodes.length && (
         <div className="empty-note">
-          <div className="hint">{t('빈 곳을 두 번 눌러 상자 만들기')}</div>
+          <div className="hint">{t('빈 곳을 끌어서 상자를 그리세요')}</div>
           <Segmented value={paperKind(paper)} options={PAPERS} onChange={(k) => { setPaper(k); if (k !== 'canvas') requestAnimationFrame(() => toPage(0, 'top', 0)) }} />
         </div>
       )}
@@ -360,11 +470,22 @@ function Canvas({ id, viewport }: { id: string; viewport?: Viewport }) {
           <button type="button" className="btn" onClick={() => useEd.setState({ picking: null, dropTarget: null })}>{t('취소')}</button>
         </div>
       )}
+      {painting && (
+        <div className="pick-bar">
+          {t('서식을 입힐 상자를 누르세요')}
+          <button type="button" className="btn" onClick={() => useEd.setState({ painter: null })}>{t('취소')}</button>
+        </div>
+      )}
       {paper && <PageIndicator paper={paper} />}
       <ZoomPanel />
     </div>
     </CanvasMenu>
   )
+}
+
+/** 방향키 → 옮길 방향과 고를 방향 */
+const ARROWS: Record<string, [number, number, 'l' | 'r' | 'u' | 'd']> = {
+  ArrowLeft: [-1, 0, 'l'], ArrowRight: [1, 0, 'r'], ArrowUp: [0, -1, 'u'], ArrowDown: [0, 1, 'd'],
 }
 
 /** 용지 노트에서 종이 바깥(책상) 색 */

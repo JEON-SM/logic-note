@@ -1,24 +1,36 @@
-import { useState } from 'react'
-import { AnimatePresence, motion } from 'motion/react'
+import { memo, useDeferredValue, useState } from 'react'
 import { useReactFlow } from '@xyflow/react'
 import { useEditorState } from '@tiptap/react'
 import { useShallow } from 'zustand/react/shallow'
 import {
-  AlignCenter, AlignLeft, AlignRight, Baseline, Bold, CornerDownRight, Copy, Film, Hand, Highlighter, ImagePlus, Italic,
-  Link2, List, ListChecks, ListOrdered, MoreHorizontal, MousePointer2, PaintBucket, Spline, Square, Strikethrough, Tag,
-  Trash2, Type, Underline, GitBranchPlus, Eye, EyeOff, Group, Ungroup, Palette, StickyNote, NotebookPen, Scaling, LogIn,
+  AlignCenter, AlignLeft, AlignRight, AlignVerticalJustifyCenter, AlignVerticalJustifyEnd, AlignVerticalJustifyStart, Baseline, Bold, BoxSelect,
+  CornerDownRight, Copy, Film, Hand, Highlighter, ImagePlus, Italic, LayoutTemplate, Link2, List, ListChecks, ListOrdered, MoreHorizontal,
+  Paintbrush, PaintBucket, Spline, Square, SquarePlus, Strikethrough, Tag, Trash2, Type, Underline, GitBranchPlus, Eye, EyeOff, Group, Ungroup,
+  Palette, StickyNote, NotebookPen, Scaling, LogIn,
 } from 'lucide-react'
 import { HIGHLIGHTS } from '../lib/color'
 import { pickFiles } from '../lib/media'
 import { FONTS, SIZES, parseSize, sizeInPt } from '../lib/rich'
-import { MEMOS, RELS, SHAPES, defaultBox, defaultEdge, isMemo } from '../lib/shapes'
-import type { EdgeData } from '../lib/types'
+import { MEMOS, RELS, SHAPES, defaultBox, defaultEdge, isMemo, normalizeShape } from '../lib/shapes'
+import type { BoxData, EdgeData, Rule, Shape, VAlign } from '../lib/types'
 import { ColorButton, IB, Item, Menu, MenuSep, Pop, RelIcon, Sep, ShapeIcon, cls } from '../ui/kit'
 import { addChild, insertFiles, insertLink } from './actions'
 import { startPicking } from './CanvasMenu'
 import { openDefaults } from './DefaultsDialog'
-import { copySelection, fmt, groupSelection, pasteClip, patchEdges, patchNodes, takeOut, useEd } from './store'
+import { copySelection, fmt, groupSelection, pasteClip, patchEdges, patchNodes, pickLook, takeOut, useEd } from './store'
 import { t } from '../lib/i18n'
+
+/** 모양 바꾸기: 줄 메모지는 메모지 + 줄 서식 */
+const shapePatch = (s: Shape): Partial<BoxData> => { const n = normalizeShape(s); return { shape: n.shape, ...(s === 'memo-lined' ? { rule: 'lines' } : s === 'memo' ? { rule: null } : {}) } }
+const isShapeOn = (d: BoxData, s: Shape) => (s === 'memo-lined' ? d.shape === 'memo' && d.rule === 'lines' : s === 'memo' ? d.shape === 'memo' && d.rule !== 'lines' : d.shape === s)
+const RULES: { id: Rule | null; label: string }[] = [
+  { id: null, label: t('무늬 없음') }, { id: 'lines', label: t('줄') }, { id: 'grid', label: t('모눈') }, { id: 'dots', label: t('점') },
+]
+const VALIGNS: { id: VAlign; label: string; icon: React.ReactNode }[] = [
+  { id: 'top', label: t('위쪽'), icon: <AlignVerticalJustifyStart size={16} /> },
+  { id: 'middle', label: t('가운데 (세로)'), icon: <AlignVerticalJustifyCenter size={16} /> },
+  { id: 'bottom', label: t('아래쪽'), icon: <AlignVerticalJustifyEnd size={16} /> },
+]
 
 const S = { size: 18, strokeWidth: 1.6 }
 
@@ -33,35 +45,40 @@ const LineIcon = ({ dashed, arrow = 'none', kind = 'straight' }: { dashed?: bool
 export function Toolbar() {
   const selN = useEd(useShallow((s) => s.nodes.filter((n) => n.selected).map((n) => n.id)))
   const selE = useEd(useShallow((s) => s.edges.filter((e) => e.selected).map((e) => e.id)))
+  // 상자를 고르면 선택 표시가 먼저 그려지고, 무거운 도구 막대는 바로 다음에 (기다리는 움직임 없이) 바뀐다
+  const n = useDeferredValue(selN), e = useDeferredValue(selE)
+  return <ToolbarBody selN={n} selE={e} />
+}
+
+const ToolbarBody = memo(function ToolbarBody({ selN, selE }: { selN: string[]; selE: string[] }) {
+  const key = selN.length ? 'node' : selE.length ? 'edge' : 'create'
   return (
     <div className="toolbar">
       <div className="tb-inner">
-        <AnimatePresence mode="wait" initial={false}>
-          <motion.div key={selN.length ? 'node' : selE.length ? 'edge' : 'create'} className="tb-group"
-            initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.12 }}>
-            {selN.length ? <NodeTools ids={selN} /> : selE.length ? <EdgeTools ids={selE} /> : <CreateTools />}
-          </motion.div>
-        </AnimatePresence>
+        <div key={key} className="tb-group">
+          {selN.length ? <NodeTools ids={selN} /> : selE.length ? <EdgeTools ids={selE} /> : <CreateTools />}
+        </div>
       </div>
     </div>
   )
-}
+})
 
 function CreateTools() {
   const { tool, shape, edgeStyle } = useEd(useShallow((s) => ({ tool: s.tool, shape: s.shape, edgeStyle: s.edgeStyle })))
   const setStyle = (p: Partial<EdgeData>) => useEd.setState((s) => ({ edgeStyle: { ...s.edgeStyle, ...p } }))
   return (
     <>
-      <IB label={t('이동 (드래그로 화면 이동)')} on={tool === 'hand'} onClick={() => useEd.setState({ tool: 'hand' })}><Hand {...S} /></IB>
-      <IB label={t('선택 (드래그로 여러 개 선택)')} on={tool === 'select'} onClick={() => useEd.setState({ tool: 'select' })}><MousePointer2 {...S} /></IB>
+      <IB label={t('상자 그리기 (빈 곳을 끌기)')} on={tool === 'draw'} onClick={() => useEd.setState({ tool: 'draw' })}><SquarePlus {...S} /></IB>
+      <IB label={t('선택 (끌어서 여러 개 고르기)')} on={tool === 'select'} onClick={() => useEd.setState({ tool: 'select' })}><BoxSelect {...S} /></IB>
+      <IB label={t('화면 이동 (끌기 · 스페이스를 누른 채 끌어도 돼요)')} on={tool === 'hand'} onClick={() => useEd.setState({ tool: 'hand' })}><Hand {...S} /></IB>
       <Sep />
       {SHAPES.map((s) => (
-        <IB key={s.id} label={t('{{shape}} — 캔버스를 눌러 배치', { shape: s.label })} on={tool === 'place' && shape === s.id}
-          onClick={() => useEd.setState({ tool: tool === 'place' && shape === s.id ? 'hand' : 'place', shape: s.id })}>
+        <IB key={s.id} label={t('{{shape}} — 끌어서 그리기 (상자 위에 그리면 그 안에)', { shape: s.label })} on={tool === 'place' && shape === s.id}
+          onClick={() => useEd.setState({ tool: tool === 'place' && shape === s.id ? 'draw' : 'place', shape: s.id })}>
           <ShapeIcon shape={s.id} />
         </IB>
       ))}
-      <Menu trigger={<IB label={t('메모지 — 캔버스를 눌러 붙이기')} on={tool === 'place' && isMemo(shape)}><StickyNote {...S} /></IB>}>
+      <Menu trigger={<IB label={t('메모지 — 끌어서 그리기')} on={tool === 'place' && isMemo(shape)}><StickyNote {...S} /></IB>}>
         {MEMOS.map((m) => (
           <Item key={m.id} icon={m.id === 'memo' ? <StickyNote size={16} /> : <NotebookPen size={16} />} checked={tool === 'place' && shape === m.id}
             onSelect={() => useEd.setState({ tool: 'place', shape: m.id })}>{m.label}</Item>
@@ -145,9 +162,14 @@ function NodeTools({ ids }: { ids: string[] }) {
   return (
     <>
       <Menu trigger={<IB label={t('도형')}><ShapeIcon shape={first.shape} /></IB>}>
-        {SHAPES.map((s) => <Item key={s.id} icon={<ShapeIcon shape={s.id} size={16} />} checked={first.shape === s.id} onSelect={() => patchNodes(ids, { shape: s.id })}>{s.label}</Item>)}
+        {SHAPES.map((s) => <Item key={s.id} icon={<ShapeIcon shape={s.id} size={16} />} checked={isShapeOn(first, s.id)} onSelect={() => patchNodes(ids, shapePatch(s.id))}>{s.label}</Item>)}
         <MenuSep />
-        {MEMOS.map((m) => <Item key={m.id} icon={<ShapeIcon shape={m.id} size={16} />} checked={first.shape === m.id} onSelect={() => patchNodes(ids, { shape: m.id })}>{m.label}</Item>)}
+        {MEMOS.map((m) => <Item key={m.id} icon={m.id === 'memo' ? <StickyNote size={16} /> : <NotebookPen size={16} />} checked={isShapeOn(first, m.id)} onSelect={() => patchNodes(ids, shapePatch(m.id))}>{m.label}</Item>)}
+      </Menu>
+      <Menu trigger={<IB label={t('서식 (제목 줄·줄·모눈)')} on={!!(first.head || first.rule)}><LayoutTemplate {...S} /></IB>}>
+        <Item checked={!!first.head} onSelect={() => patchNodes(ids, { head: !first.head })}>{t('첫 줄을 제목으로 (아래 구분선)')}</Item>
+        <MenuSep />
+        {RULES.map((r) => <Item key={r.id ?? 'none'} checked={(first.rule ?? null) === r.id} onSelect={() => patchNodes(ids, { rule: r.id })}>{r.label}</Item>)}
       </Menu>
       <SizeBox ids={ids} />
       <ColorButton label={t('채우기')} icon={<PaintBucket {...S} />} value={first.fill} none={t('기본')} onChange={(fill) => patchNodes(ids, { fill })} />
@@ -176,16 +198,19 @@ function NodeTools({ ids }: { ids: string[] }) {
         onChange={(color) => fmt((c) => (color ? c.setColor(color) : c.unsetColor()))} />
       <ColorButton label={t('형광펜')} icon={<Highlighter {...S} />} value={m?.hl} none={t('없음')} palette={HIGHLIGHTS}
         onChange={(color) => fmt((c) => (color ? c.setHighlight({ color }) : c.unsetHighlight()))} />
-      <Menu trigger={<IB label={t('정렬')}><AlignCenter {...S} /></IB>}>
+      <Menu trigger={<IB label={t('정렬 (가로·세로)')}><AlignCenter {...S} /></IB>}>
         <Item icon={<AlignLeft size={16} />} onSelect={() => fmt((c) => c.setTextAlign('left'))}>{t('왼쪽')}</Item>
         <Item icon={<AlignCenter size={16} />} onSelect={() => fmt((c) => c.setTextAlign('center'))}>{t('가운데')}</Item>
         <Item icon={<AlignRight size={16} />} onSelect={() => fmt((c) => c.setTextAlign('right'))}>{t('오른쪽')}</Item>
+        <MenuSep />
+        {VALIGNS.map((v) => <Item key={v.id} icon={v.icon} checked={first.valign === v.id} onSelect={() => patchNodes(ids, { valign: v.id })}>{v.label}</Item>)}
       </Menu>
       <Menu trigger={<IB label={t('목록')}><List {...S} /></IB>}>
         <Item icon={<List size={16} />} onSelect={() => fmt((c) => c.toggleBulletList())}>{t('글머리 기호')}</Item>
         <Item icon={<ListOrdered size={16} />} onSelect={() => fmt((c) => c.toggleOrderedList())}>{t('번호 매기기')}</Item>
         <Item icon={<ListChecks size={16} />} onSelect={() => fmt((c) => c.toggleTaskList())}>{t('체크리스트')}</Item>
       </Menu>
+      <Painter />
       <Sep />
       <IB label={t('이미지 넣기')} onClick={async () => insertFiles(await pickFiles('image/*'))}><ImagePlus {...S} /></IB>
       <IB label={t('링크 넣기')} onClick={() => insertLink()}><Link2 {...S} /></IB>
@@ -195,7 +220,7 @@ function NodeTools({ ids }: { ids: string[] }) {
         <Item icon={<LogIn size={16} />} onSelect={() => startPicking(ids)}>{t('다른 상자에 넣기…')}</Item>
         {inSet && <Item icon={<Ungroup size={16} />} onSelect={() => takeOut(ids)}>{t('집합에서 꺼내기')}</Item>}
         <Item icon={<Copy size={16} />} onSelect={() => { copySelection(); pasteClip() }}>{t('복제 (Ctrl+D)')}</Item>
-        <Item icon={<Scaling size={16} />} onSelect={() => patchNodes(ids, { w: null, h: null, wrap: null })}>{t('크기 자동 맞춤')}</Item>
+        <Item icon={<Scaling size={16} />} onSelect={() => patchNodes(ids, { w: null, h: null, wrap: null })}>{t('크기를 글에 맞추기')}</Item>
         <Item icon={<Film size={16} />} onSelect={async () => insertFiles(await pickFiles('video/*'))}>{t('영상 넣기')}</Item>
         {hasLinks && (
           <Item icon={first.hidePreview ? <Eye size={16} /> : <EyeOff size={16} />} onSelect={() => patchNodes(ids, { hidePreview: !first.hidePreview })}>
@@ -208,22 +233,37 @@ function NodeTools({ ids }: { ids: string[] }) {
   )
 }
 
-/** 상자 크기를 숫자로: 비우면 그쪽은 글에 맞춰 자동 */
+/** 서식 브러시 (Word처럼): 한 번 누르면 다음 상자 하나에, 두 번 누르면 Esc까지 여러 상자에 */
+function Painter() {
+  const on = useEd((s) => !!s.painter)
+  return (
+    <IB label={t('서식 복사 (두 번 누르면 계속)')} on={on}
+      onClick={() => (on ? useEd.setState({ painter: null }) : pickLook(false))} onDoubleClick={() => pickLook(true)}>
+      <Paintbrush {...S} />
+    </IB>
+  )
+}
+
+/** 상자 크기를 숫자로 (글이 넘치면 상자 안에서 스크롤) */
 function SizeBox({ ids }: { ids: string[] }) {
   const n = useEd((s) => s.nodes.find((x) => x.id === ids[0]))
   const [w, setW] = useState(''), [h, setH] = useState('')
-  const cur = { w: Math.round(n?.measured?.width ?? 0), h: Math.round(n?.measured?.height ?? 0) }
-  const num = (v: string) => { const m = v.trim().match(/^(\d+(?:\.\d+)?)\s*(px)?$/i); return m ? Math.min(4000, Math.max(24, Math.round(+m[1]))) : null }
+  const num = (v: string) => { const m = v.trim().match(/^(\d+(?:\.\d+)?)\s*(px)?$/i); return m ? Math.min(4000, Math.max(24, Math.round(+m[1]))) : undefined }
+  const cur = () => { setW(n?.data.w ? String(Math.round(n.data.w)) : ''); setH(n?.data.h ? String(Math.round(n.data.h)) : '') }
   return (
-    <Pop trigger={<IB label={t('상자 크기')} on={!!(n?.data.w || n?.data.h)} onClick={() => { setW(n?.data.w ? String(Math.round(n.data.w)) : ''); setH(n?.data.h ? String(Math.round(n.data.h)) : '') }}><Scaling {...S} /></IB>}>
-      <form className="size-box" onSubmit={(e) => { e.preventDefault(); patchNodes(ids, { w: num(w), h: num(h), wrap: null }) }}>
-        <label>{t('폭')}<input className="field sm" inputMode="numeric" placeholder={t('자동 ({{n}})', { n: cur.w })} value={w} onChange={(e) => setW(e.target.value)} /></label>
-        <label>{t('높이')}<input className="field sm" inputMode="numeric" placeholder={t('자동 ({{n}})', { n: cur.h })} value={h} onChange={(e) => setH(e.target.value)} /></label>
+    <Pop trigger={<IB label={t('상자 크기')} onClick={cur}><Scaling {...S} /></IB>}>
+      <form className="size-box" onSubmit={(e) => {
+        e.preventDefault()
+        const nw = num(w), nh = num(h)
+        if (nw || nh) patchNodes(ids, { ...(nw && { w: nw }), ...(nh && { h: nh }), wrap: null })
+      }}>
+        <label>{t('폭')}<input className="field sm" inputMode="numeric" value={w} onChange={(e) => setW(e.target.value)} /></label>
+        <label>{t('높이')}<input className="field sm" inputMode="numeric" value={h} onChange={(e) => setH(e.target.value)} /></label>
         <div className="size-box-row">
-          <button type="button" className="btn" onClick={() => { setW(''); setH(''); patchNodes(ids, { w: null, h: null, wrap: null }) }}>{t('자동')}</button>
+          <button type="button" className="btn" onClick={() => patchNodes(ids, { w: null, h: null, wrap: null })}>{t('글에 맞추기')}</button>
           <button type="submit" className="btn primary">{t('적용')}</button>
         </div>
-        <p className="set-help">{t('선택한 상자의 모서리나 변을 끌어도 돼요.')}</p>
+        <p className="set-help">{t('선택한 상자의 모서리나 변을 끌어도 돼요. 넘치는 글은 상자 안에서 스크롤돼요.')}</p>
       </form>
     </Pop>
   )

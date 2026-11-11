@@ -1,7 +1,12 @@
 import type { Node, Edge, Viewport } from '@xyflow/react'
 
+/** 'round'(둥근 사각형)·'memo-lined'(줄 메모지)는 예전 노트에만 있다. 열 때 'rect'·'memo'+줄 서식으로 바뀐다 */
 export type Shape = 'rect' | 'round' | 'ellipse' | 'diamond' | 'para' | 'hex' | 'memo' | 'memo-lined'
 export type Bg = 'grid' | 'grid-wide' | 'dots' | 'dots-wide' | 'lines' | 'none'
+/** 상자 안 바탕 무늬 (서식) */
+export type Rule = 'lines' | 'grid' | 'dots'
+/** 상자 안 글의 세로 위치 */
+export type VAlign = 'top' | 'middle' | 'bottom'
 
 export interface MediaItem { id: string; kind: 'image' | 'video'; mediaId: string }
 
@@ -10,7 +15,9 @@ export interface Port { id: string; u: number; v: number }
 
 export type BoxData = {
   shape: Shape
+  /** 예전 노트의 제목 칸. 열 때 body 앞에 합쳐지고 비워진다 */
   title: string
+  /** 상자 글 전체 (HTML). head 서식이면 첫 단락이 제목 줄 */
   body: string
   media: MediaItem[]
   fill: string | null
@@ -19,12 +26,21 @@ export type BoxData = {
   dash: 'solid' | 'dashed' | 'none'
   /** 예전 방식의 글 폭 고정 (지금은 w를 쓴다) */
   wrap: number | null
-  /** 직접 정한 상자 크기. 글이 더 많으면 그만큼 커진다. 집합은 이 크기를 유지하며 안쪽 상자에 맞춰 늘어난다 */
+  /**
+   * 상자 크기. 정해져 있으면 글이 넘쳐도 그대로이고 넘친 글은 상자 안에서 스크롤한다.
+   * 없으면(예전 노트·붙여넣은 그림·'글에 맞추기') 한 번 글에 맞춰 잰 뒤 그 크기로 고정된다
+   */
   w?: number | null
   h?: number | null
+  /** 서식: 첫 줄을 제목으로 (굵게, 아래 구분선) */
+  head?: boolean
+  /** 서식: 상자 안 바탕 무늬 */
+  rule?: Rule | null
+  /** 글의 세로 위치 (없으면 가운데, 안에 상자가 있거나 메모지·줄 서식이면 위) */
+  valign?: VAlign | null
   hidePreview?: boolean
   ports?: Port[]
-  /** 이 상자를 감싸는 상자(집합) */
+  /** 이 상자를 감싸는 상자 */
   parent?: string | null
 }
 

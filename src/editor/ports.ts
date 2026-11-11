@@ -62,7 +62,7 @@ export function usePortMoving() {
     if (!n || !from) return
     e.stopPropagation()
 
-    const r = rectOf(n, s.frames[id]), pts = outlinePoints(n.data.shape, r.w, r.h)
+    const r = rectOf(n), pts = outlinePoints(n.data.shape, r.w, r.h)
     const others = n.data.ports!.filter((p) => p.id !== port)
     const free = (u: number, v: number) => !others.some((o) => Math.hypot(o.u - u, o.v - v) < 0.02)
     const locate = outlineLocator(rf, r, pts, shapeAnchors(n.data.shape, r.w, r.h).filter((a) => free(a.x / r.w, a.y / r.h)), Infinity)
@@ -125,7 +125,7 @@ export function usePortPlacing() {
     const z = rf.getZoom(), at = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY })
     // 연결점을 두 번 누르면 지운다
     for (const n of s.nodes) {
-      const r = rectOf(n, s.frames[n.id])
+      const r = rectOf(n)
       const dot = n.data.ports?.find((p) => Math.hypot(r.x + p.u * r.w - at.x, r.y + p.v * r.h - at.y) * z <= DOT)
       if (!dot) continue
       e.stopPropagation()
@@ -137,7 +137,7 @@ export function usePortPlacing() {
     // 누른 곳에서 가장 가까운 테두리
     let hit: { id: string; r: ReturnType<typeof rectOf>; pts: P[]; d: number } | null = null
     for (const n of s.nodes) {
-      const r = rectOf(n, s.frames[n.id]), m = PICK / z
+      const r = rectOf(n), m = PICK / z
       if (!r.w || at.x < r.x - m || at.x > r.x + r.w + m || at.y < r.y - m || at.y > r.y + r.h + m) continue
       const pts = outlinePoints(n.data.shape, r.w, r.h), { d } = nearest(pts, { x: at.x - r.x, y: at.y - r.y })
       if (d * z <= PICK && (!hit || d < hit.d)) hit = { id: n.id, r, pts, d }

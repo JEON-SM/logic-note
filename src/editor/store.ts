@@ -3,17 +3,21 @@ import { create } from 'zustand'
 import { applyEdgeChanges, applyNodeChanges, type EdgeChange, type NodeChange, type XYPosition } from '@xyflow/react'
 import type { Editor } from '@tiptap/core'
 import { animate } from 'motion/react'
-import { uid, updateNote } from '../lib/db'
+import { backupOnce, uid, updateNote } from '../lib/db'
+import { upgradeNodes } from '../lib/boxtext'
 import { fitToPaper, newPaper, nodesByPage, pageAt, pageOrigin, pageSize, pagesSize, paperKind, relocate, type PaperKind } from '../lib/pages'
-import { applyToHtml, type Fmt } from '../lib/rich'
-import { boxAt, hierarchy, layoutSets, rectOf, type Frame, type Rect } from '../lib/sets'
-import { MEMO, attachPorts, defaultBox, defaultEdge, isMemo } from '../lib/shapes'
+import { applyToHtml, readTextLook, textLookFmt, type Fmt, type TextLook } from '../lib/rich'
+import { boxAround, boxAt, hierarchy, inside, layoutDepth, rectOf, type Rect } from '../lib/sets'
+import { MEMO, attachPorts, boxSize, defaultBox, defaultEdge, isMemo, normalizeShape } from '../lib/shapes'
 import { noteLook, type Theme } from '../lib/color'
 import { useSettings, useTheme } from '../lib/store'
 import type { Bg, BoxData, BoxNode, Defaults, EdgeData, LogicEdge, Note, Paper, Shape } from '../lib/types'
 
 type Snap = { nodes: BoxNode[]; edges: LogicEdge[]; paper: Paper | null }
-export type Tool = 'hand' | 'select' | 'place'
+/** draw: 빈 곳을 끌어 상자 그리기(기본) · select: 끌어서 여러 개 고르기 · hand: 끌어서 화면 이동 · place: 고른 도형을 어디서든 그리기(한 번) */
+export type Tool = 'draw' | 'select' | 'hand' | 'place'
+/** 서식 브러시로 옮기는 모양 */
+export type BoxLook = Pick<BoxData, 'shape' | 'fill' | 'stroke' | 'strokeWidth' | 'dash' | 'head' | 'rule' | 'valign'> & { text: TextLook }
 
 interface S {
   noteId: string
@@ -29,32 +33,38 @@ interface S {
   defaults: Defaults | null
   nodes: BoxNode[]
   edges: LogicEdge[]
-  /** 집합(안에 상자가 있는 상자)의 계산된 크기 */
-  frames: Record<string, Frame>
   /** 끌고 있는 상자를 놓으면 들어갈 상자 */
   dropTarget: string | null
   /** '다른 상자에 넣기': 넣을 상자를 고르는 중인 상자들 */
   picking: string[] | null
-  /** 손잡이로 크기를 바꾸고 있는 상자 (이때는 틀 움직임을 생략) */
+  /** 손잡이로 크기를 바꾸고 있는 상자 */
   resizing: string | null
-  /** 테두리에 놓으려는 연결점 (상자 안 좌표) */
-  /** 놓거나 옮기는 중인 연결점 (port: 옮기는 점의 id) */
+  /** 놓거나 옮기는 중인 연결점 (상자 안 좌표, port: 옮기는 점의 id) */
   portDraft: { id: string; x: number; y: number; snapped: boolean; port?: string } | null
   editingId: string | null
+  /**
+   * 하나만 골라 둔 상자: 편집기를 미리 띄워 두고 숨은 커서를 둔다. 그대로 타자를 치면(한글 첫 글자도) 바로 글이 들어간다.
+   * 고른 직후 화면이 먼저 그려지도록 두 프레임 뒤에 정해진다
+   */
+  readyId: string | null
   editingEdge: string | null
   active: Editor | null
   tool: Tool
   shape: Shape
   edgeStyle: EdgeData
+  /** 서식 브러시: 다음에 누르는 상자에 이 모양을 입힌다 (sticky면 Esc까지 계속) */
+  painter: { look: BoxLook; sticky: boolean } | null
   past: Snap[]
   future: Snap[]
   rev: number
+  /** 안에 상자가 있는 상자 (글을 위쪽에 둔다) */
+  hosts: Set<string>
 }
 
 export const useEd = create<S>(() => ({
-  noteId: '', title: '', bg: 'grid', ground: null, mode: null, paper: null, defaults: null, nodes: [], edges: [], frames: {}, dropTarget: null, picking: null, resizing: null, portDraft: null,
-  editingId: null, editingEdge: null, active: null,
-  tool: 'hand', shape: 'rect', edgeStyle: defaultEdge(), past: [], future: [], rev: 0,
+  noteId: '', title: '', bg: 'grid', ground: null, mode: null, paper: null, defaults: null, nodes: [], edges: [], dropTarget: null, picking: null, resizing: null, portDraft: null,
+  editingId: null, readyId: null, editingEdge: null, active: null, painter: null, hosts: new Set<string>(),
+  tool: 'draw', shape: 'rect', edgeStyle: defaultEdge(), past: [], future: [], rev: 0,
 }))
 const get = useEd.getState
 const set = useEd.setState
@@ -74,7 +84,7 @@ export function useLook() {
 export const effDefaults = () => get().defaults ?? useSettings.getState().defaults
 export function applyDefaults() {
   const d = effDefaults()
-  set({ edgeStyle: { ...defaultEdge(), ...d.edge }, shape: d.shape })
+  set({ edgeStyle: { ...defaultEdge(), ...d.edge }, shape: normalizeShape(d.shape).shape })
 }
 export function setNoteDefaults(defaults: Defaults | null) {
   set({ defaults })
@@ -86,10 +96,14 @@ useSettings.subscribe((s, p) => { if (s.defaults !== p.defaults && !get().defaul
 let loading = false
 export function loadNote(n: Note) {
   loading = true
-  const { nodes, edges } = n.dots ? n : attachPorts(n.nodes, n.edges)
+  const base = n.dots ? n : attachPorts(n.nodes, n.edges)
+  // 예전 노트: 제목·설명 칸을 한 칸으로, 둥근 모서리는 각지게. 바꾸기 전 원본은 이 기기에 남겨 둔다
+  const nodes = upgradeNodes(base.nodes)
+  if (base !== n || nodes !== base.nodes || nodes.some((x) => x.data.w == null || x.data.h == null)) backupOnce(n).catch(() => {})
   set({
-    noteId: n.id, title: n.title, bg: n.bg ?? 'grid', ground: n.ground ?? null, mode: n.mode ?? null, paper: n.paper ?? null, defaults: n.defaults ?? null, nodes, edges, frames: {},
-    editingId: null, editingEdge: null, dropTarget: null, picking: null, resizing: null, portDraft: null, past: [], future: [], rev: 0, tool: 'hand',
+    noteId: n.id, title: n.title, bg: n.bg ?? 'grid', ground: n.ground ?? null, mode: n.mode ?? null, paper: n.paper ?? null, defaults: n.defaults ?? null,
+    nodes, edges: base.edges, editingId: null, readyId: null, editingEdge: null, dropTarget: null, picking: null, resizing: null, portDraft: null, painter: null,
+    past: [], future: [], rev: 0, tool: 'draw',
   })
   applyDefaults()
   loading = false
@@ -112,25 +126,45 @@ useEd.subscribe((s, p) => {
 })
 addEventListener('pagehide', flushSave)
 
-// ── 집합 배치 ──
-// 상자 글 영역의 잰 크기 (BoxNode가 알려 준다). 바깥 상자의 머리글 자리를 잡는 데 쓴다
-const heads = new Map<string, { w: number; h: number }>()
-// 끄는 동안·미끄러지는 동안에는 틀을 다시 맞추지 않는다
+// ── 겹 순서: 안쪽 상자를 바깥 상자 위에 ──
+// 끄는 동안·미끄러지는 동안에는 다시 맞추지 않는다
 let dragging = false
 let moving = false
 export function relayout() {
   if (dragging || moving) return
   const s = get()
-  const r = layoutSets(s.nodes, s.edges, s.frames, heads, s.editingId)
-  if (r.nodes !== s.nodes || r.edges !== s.edges || r.frames !== s.frames) set({ nodes: r.nodes, edges: r.edges, frames: r.frames })
+  const r = layoutDepth(s.nodes, s.edges)
+  const hosts = new Set<string>()
+  for (const n of s.nodes) if (n.data.parent) hosts.add(n.data.parent)
+  const sameHosts = hosts.size === s.hosts.size && [...hosts].every((h) => s.hosts.has(h))
+  if (r.nodes !== s.nodes || r.edges !== s.edges || !sameHosts) set({ nodes: r.nodes, edges: r.edges, ...(!sameHosts && { hosts }) })
 }
-useEd.subscribe((s, p) => { if (s.nodes !== p.nodes || s.edges !== p.edges || s.editingId !== p.editingId) relayout() })
-export function reportHead(id: string, w: number, h: number) {
-  const old = heads.get(id)
-  if (old && old.w === w && old.h === h) return
-  heads.set(id, { w, h })
-  if (get().frames[id]) relayout()
+useEd.subscribe((s, p) => { if (s.nodes !== p.nodes || s.edges !== p.edges) relayout() })
+
+// ── 미리 띄워 두는 편집기 (그대로 타자 치기) ──
+let pointerKind = 'mouse'
+/** 마지막으로 누른 입력 장치. 터치로 고르면 화면 키보드가 뜨지 않게 편집기를 미리 띄우지 않는다 */
+export const notePointer = (kind: string) => { pointerKind = kind }
+const singleSelected = (nodes: BoxNode[]) => {
+  let id: string | null = null
+  for (const n of nodes) if (n.selected) { if (id) return null; id = n.id }
+  return id
 }
+let readyFrame = 0
+useEd.subscribe((s, p) => {
+  if (s.nodes === p.nodes && s.editingId === p.editingId && s.readyId === p.readyId) return
+  if (s.editingId) { if (s.readyId !== s.editingId) set({ readyId: s.editingId }); return }
+  const sel = pointerKind === 'touch' ? null : singleSelected(s.nodes)
+  if (sel === s.readyId) return
+  cancelAnimationFrame(readyFrame)
+  // 편집을 막 끝낸 상자는 편집기를 그대로 둔다 (다시 그리지 않게)
+  if (sel && p.editingId === sel) return set({ readyId: sel })
+  if (s.readyId) set({ readyId: null })
+  if (sel) readyFrame = requestAnimationFrame(() => requestAnimationFrame(() => {
+    const st = get()
+    if (!st.editingId && !dragging && singleSelected(st.nodes) === sel) set({ readyId: sel })
+  }))
+})
 
 // ── 실행 취소 ──
 export function commit() { set((s) => ({ past: [...s.past.slice(-99), snap()], future: [] })) }
@@ -145,32 +179,96 @@ export function redo() {
   set((s) => ({ future: s.future.slice(0, -1), past: [...s.past, snap()], ...f, editingId: null, rev: bump() }))
 }
 
+// ── 모눈에 맞추기 (Alt를 누르고 있으면 자유롭게) ──
+let free = false
+export const setFree = (v: boolean) => { free = v }
+/** 배경 무늬의 칸 크기 (줄 무늬는 줄 간격) */
+const gridStep = () => {
+  const bg = get().bg, s = bg.endsWith('-wide') ? 48 : 24
+  return { x: s, y: bg === 'lines' ? 28 : s }
+}
+/** 점을 가까운 모눈 교차점으로. 용지 노트는 그 페이지의 왼쪽 위가 기준 */
+export function snapXY(p: XYPosition): XYPosition {
+  if (free) return p
+  const g = gridStep(), paper = get().paper
+  const o = paper ? pageOrigin(paper, pageAt(paper, p)) : { x: 0, y: 0 }
+  return { x: o.x + Math.round((p.x - o.x) / g.x) * g.x, y: o.y + Math.round((p.y - o.y) / g.y) * g.y }
+}
+/** w×h 상자의 중심을, 왼쪽 위 모서리가 모눈에 닿도록 */
+export function snapCenter(c: XYPosition, w: number, h: number): XYPosition {
+  const tl = snapXY({ x: c.x - w / 2, y: c.y - h / 2 })
+  return { x: tl.x + w / 2, y: tl.y + h / 2 }
+}
+/** 크기를 바꾸는 중: 움직인 변만 모눈에 */
+function snapEdges(r: Rect, r0: Rect): Rect {
+  if (free) return r
+  const a = snapXY({ x: r.x, y: r.y }), b = snapXY({ x: r.x + r.w, y: r.y + r.h })
+  let L = r.x, T = r.y, R = r.x + r.w, B = r.y + r.h
+  if (Math.abs(L - r0.x) > 0.5) L = Math.min(a.x, R - 24)
+  if (Math.abs(T - r0.y) > 0.5) T = Math.min(a.y, B - 24)
+  if (Math.abs(R - (r0.x + r0.w)) > 0.5) R = Math.max(b.x, L + 24)
+  if (Math.abs(B - (r0.y + r0.h)) > 0.5) B = Math.max(b.y, T + 24)
+  return { x: L, y: T, w: R - L, h: B - T }
+}
+let resizeFrom: { id: string; rect: Rect } | null = null
+export function beginResize(id: string) {
+  const n = get().nodes.find((x) => x.id === id)
+  commit()
+  resizeFrom = n ? { id, rect: rectOf(n) } : null
+  set({ resizing: id })
+}
+export function endResize(id: string) {
+  resizeFrom = null
+  set({ resizing: null })
+  settleKids(id)
+}
+
 export function onNodesChange(changes: NodeChange<BoxNode>[]) {
-  // 크기 손잡이(NodeResizer)의 변경은 상자 자료의 w·h로 옮긴다. 손대지 않은 쪽은 자동 크기로 둔다
-  const sized = new Map<string, { w?: number; h?: number }>()
-  const ch = changes.map((c) => {
-    if (c.type !== 'dimensions' || !c.setAttributes || !c.dimensions) return c
-    const n = get().nodes.find((x) => x.id === c.id)
-    const m = n?.measured, d = c.dimensions
-    sized.set(c.id, {
-      ...((n?.data.w || !m?.width || Math.abs(d.width - m.width) > 0.5) && { w: Math.round(d.width) }),
-      ...((n?.data.h || !m?.height || Math.abs(d.height - m.height) > 0.5) && { h: Math.round(d.height) }),
-    })
-    return { ...c, setAttributes: undefined }
+  const s = get()
+  const byId = new Map(s.nodes.map((n) => [n.id, n]))
+  // 크기 손잡이(NodeResizer): 폭·높이는 상자 자료로, 움직인 변은 모눈에 맞춘다
+  const sized = new Map<string, { w: number; h: number }>()
+  const center = new Map<string, XYPosition>()
+  for (const c of changes) {
+    if (c.type !== 'dimensions' || !c.setAttributes || !c.dimensions) continue
+    const n = byId.get(c.id)
+    if (!n) continue
+    const at = (changes.find((x) => x.type === 'position' && x.id === c.id && x.position) as { position: XYPosition } | undefined)?.position ?? n.position
+    let r: Rect = { x: at.x - c.dimensions.width / 2, y: at.y - c.dimensions.height / 2, w: c.dimensions.width, h: c.dimensions.height }
+    if (resizeFrom?.id === c.id) r = snapEdges(r, resizeFrom.rect)
+    sized.set(c.id, { w: Math.round(r.w), h: Math.round(r.h) })
+    center.set(c.id, { x: r.x + r.w / 2, y: r.y + r.h / 2 })
+  }
+  let ch = changes.map((c) => {
+    if (c.type === 'dimensions' && c.setAttributes) return { ...c, setAttributes: undefined }
+    if (c.type === 'position' && center.has(c.id)) return { ...c, position: center.get(c.id) }
+    return c
   })
+  // 끄는 중(그리고 놓는 순간): 앞장선 상자의 왼쪽 위를 모눈에 맞추고, 함께 끄는 상자도 같은 만큼.
+  // React Flow는 놓을 때 맞추기 전 자리를 한 번 더 보내므로(dragging: false) 그것도 맞춘다
+  const isDrag = (c: NodeChange<BoxNode>) => c.type === 'position' && typeof c.dragging === 'boolean' && !!c.position && !center.has(c.id)
+  const drags = ch.filter(isDrag) as { id: string; position: XYPosition }[]
+  if (drags.length && !free) {
+    const lead = byId.get(drags[0].id)
+    if (lead) {
+      const r = rectOf(lead), p = drags[0].position, to = snapCenter(p, r.w, r.h)
+      const dx = to.x - p.x, dy = to.y - p.y
+      if (dx || dy) ch = ch.map((c) => (isDrag(c) && c.type === 'position' ? { ...c, position: { x: c.position!.x + dx, y: c.position!.y + dy } } : c))
+    }
+  }
   const content = ch.some((c) => c.type !== 'select' && c.type !== 'dimensions') || sized.size > 0
-  set((s) => {
-    let nodes = applyNodeChanges(ch, s.nodes)
+  set((st) => {
+    let nodes = applyNodeChanges(ch, st.nodes)
     if (sized.size) nodes = nodes.map((n) => (sized.has(n.id) ? { ...n, data: { ...n.data, ...sized.get(n.id), wrap: null } } : n))
     // 바깥 상자를 끌면 안의 상자도 같이 움직인다 (크기 조절로 중심이 옮겨진 건 제외)
     const moves = ch.filter((c) => c.type === 'position' && c.position && !sized.has(c.id))
     if (moves.length) {
-      const { descendants } = hierarchy(s.nodes)
+      const { descendants } = hierarchy(st.nodes)
       const moving = new Set(moves.map((c) => (c as { id: string }).id))
       const delta = new Map<string, XYPosition>()
       for (const c of moves) {
         if (c.type !== 'position' || !c.position) continue
-        const old = s.nodes.find((n) => n.id === c.id)
+        const old = byId.get(c.id)
         if (!old) continue
         const dx = c.position.x - old.position.x, dy = c.position.y - old.position.y
         if (dx || dy) for (const d of descendants(c.id)) if (!moving.has(d)) delta.set(d, { x: dx, y: dy })
@@ -178,12 +276,12 @@ export function onNodesChange(changes: NodeChange<BoxNode>[]) {
       if (delta.size) nodes = nodes.map((n) => { const d = delta.get(n.id); return d ? { ...n, position: { x: n.position.x + d.x, y: n.position.y + d.y } } : n })
     }
     // 바깥 상자를 지우면 안의 상자는 한 겹 바깥으로
-    const removed = new Map(ch.filter((c) => c.type === 'remove').map((c) => [(c as { id: string }).id, s.nodes.find((n) => n.id === (c as { id: string }).id)?.data.parent ?? null]))
+    const removed = new Map(ch.filter((c) => c.type === 'remove').map((c) => [(c as { id: string }).id, byId.get((c as { id: string }).id)?.data.parent ?? null]))
     if (removed.size) {
       const up = (p: string | null | undefined): string | null => (p && removed.has(p) ? up(removed.get(p)) : p ?? null)
       nodes = nodes.map((n) => (n.data.parent && removed.has(n.data.parent) ? { ...n, data: { ...n.data, parent: up(n.data.parent) } } : n))
     }
-    return { nodes, rev: content ? s.rev + 1 : s.rev }
+    return { nodes, rev: content ? st.rev + 1 : st.rev }
   })
 }
 export function onEdgesChange(ch: EdgeChange<LogicEdge>[]) {
@@ -193,26 +291,55 @@ export function onEdgesChange(ch: EdgeChange<LogicEdge>[]) {
 
 export const selectedNodes = () => get().nodes.filter((n) => n.selected)
 export const selectedEdges = () => get().edges.filter((e) => e.selected)
+/** 이 상자들만 고른다 (바뀌는 상자만 새로 만든다) */
+export function selectOnly(ids: string[]) {
+  const on = new Set(ids)
+  set((s) => ({
+    nodes: s.nodes.map((n) => (on.has(n.id) === !!n.selected ? n : { ...n, selected: on.has(n.id) })),
+    edges: s.edges.some((e) => e.selected) ? s.edges.map((e) => (e.selected ? { ...e, selected: false } : e)) : s.edges,
+  }))
+}
 
 /** 방금 만든 상자 (BoxNode가 나타나는 움직임을 한 번 보여 주고 지운다) */
 export const born = new Set<string>()
 
-export function addBox(position: XYPosition, shape: Shape, patch: Partial<BoxData> = {}) {
+/**
+ * 새 상자. position은 중심. 크기를 따로 주지 않으면 도형의 기본 크기이고, 왼쪽 위가 모눈에 닿게 놓인다.
+ * patch에 w: null, h: null을 주면 글(그림)에 맞춰 한 번 잰 뒤 고정된다
+ */
+export function addBox(position: XYPosition, shape0: Shape, patch: Partial<BoxData> = {}, opts: { pop?: boolean; snap?: boolean } = {}) {
   commit()
   const id = uid()
-  born.add(id)
+  if (opts.pop !== false) born.add(id)
   const d = effDefaults()
-  const memo = isMemo(shape) && { fill: MEMO.fill, stroke: null, dash: 'none' as const, w: MEMO.w, h: MEMO.h }
-  const node: BoxNode = {
-    id, type: 'box', position: clampToPaper(position), selected: true,
-    data: { ...defaultBox(shape), fill: d.fill, stroke: d.stroke, ...memo, ...patch },
-  }
+  const { shape, rule } = normalizeShape(shape0)
+  const size = boxSize(shape)
+  const memo = isMemo(shape) && { fill: MEMO.fill, stroke: null, dash: 'none' as const }
+  const data: BoxData = { ...defaultBox(shape), fill: d.fill, stroke: d.stroke, ...memo, ...(rule && { rule }), w: size.w, h: size.h, ...patch }
+  const at = opts.snap !== false && data.w && data.h ? snapCenter(position, data.w, data.h) : position
+  const node: BoxNode = { id, type: 'box', position: clampToPaper(at), selected: true, data }
   set((s) => ({
     nodes: [...s.nodes.map((n) => (n.selected ? { ...n, selected: false } : n)), node],
-    edges: s.edges.map((e) => (e.selected ? { ...e, selected: false } : e)),
+    edges: s.edges.some((e) => e.selected) ? s.edges.map((e) => (e.selected ? { ...e, selected: false } : e)) : s.edges,
     rev: s.rev + 1,
   }))
   return id
+}
+
+/** 끌어서 그린 사각형으로 상자를 만들고 바로 글을 쓴다. 다른 상자 안에 완전히 들어가면 그 상자 안으로 */
+export function drawBox(r: Rect, shape: Shape) {
+  const parent = boxAround(get().nodes, r)
+  const id = addBox({ x: r.x + r.w / 2, y: r.y + r.h / 2 }, shape, { w: Math.round(r.w), h: Math.round(r.h), parent }, { pop: false, snap: false })
+  startEditing(id, undefined, false)
+  return id
+}
+
+/** 크기가 정해지지 않은 상자(예전 노트·그림)를 잰 크기로 고정한다 (실행 취소 기록 없이) */
+export function fixSize(id: string, w: number, h: number) {
+  set((s) => ({
+    nodes: s.nodes.map((n) => (n.id === id && (n.data.w == null || n.data.h == null) ? { ...n, data: { ...n.data, w: Math.round(w), h: Math.round(h), wrap: null } } : n)),
+    rev: s.rev + 1,
+  }))
 }
 
 export function addLink(source: string, sourceHandle: string, target: string, targetHandle: string, record = true) {
@@ -239,7 +366,7 @@ export function patchEdges(ids: string[], patch: Partial<EdgeData>) {
   set((s) => ({ edges: s.edges.map((e) => (ids.includes(e.id) ? { ...e, data: { ...defaultEdge(), ...e.data, ...patch } } : e)), rev: s.rev + 1 }))
 }
 
-// ── 집합: 끌어서 넣고 빼기, 묶기 ──
+// ── 상자 안의 상자: 끌어서 넣고 빼기, 묶기 ──
 let draggedIds = new Set<string>()
 export function startDrag(ids: string[]) {
   commit()
@@ -247,18 +374,12 @@ export function startDrag(ids: string[]) {
   const { descendants } = hierarchy(get().nodes)
   draggedIds = new Set(ids.flatMap((id) => [id, ...descendants(id)]))
 }
-/** 끄는 동안: 상자 중심이 어느 상자 안에 있는지 표시 */
+/** 끄는 동안: 상자 중심을 품은 상자를 표시 (원래 바깥 상자여도 중심이 밖으로 나가면 빠진다) */
 export function dragOver(id: string) {
   const s = get()
   const n = s.nodes.find((x) => x.id === id)
   if (!n) return
-  let target = boxAt(s.nodes, s.frames, n.position.x, n.position.y, draggedIds)
-  // 원래 집합에 조금이라도 걸쳐 있으면 그 안에 남는다 (틀이 늘어남). 완전히 벗어나야 빠진다
-  const p = n.data.parent && s.nodes.find((x) => x.id === n.data.parent)
-  if (p && target !== p.id && !(target && hierarchy(s.nodes).descendants(p.id).includes(target))) {
-    const a = rectOf(n), b = rectOf(p, s.frames[p.id])
-    if (a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y) target = p.id
-  }
+  const target = boxAt(s.nodes, n.position.x, n.position.y, draggedIds)
   if (target !== s.dropTarget) set({ dropTarget: target })
 }
 /** 놓을 때: 함께 끈 상자 중 가장 바깥 것들을 표시된 상자 안으로 (빈 곳이면 밖으로) */
@@ -290,20 +411,42 @@ export function finishDrag(ids: string[]) {
   if (back.size) glide(back, () => {})
 }
 
-/** 선택한 상자들을 새 상자로 감싼다 (Ctrl+G) */
+/** 크기를 줄여 중심이 밖으로 나간 안쪽 상자는 한 겹 바깥으로 */
+export function settleKids(id: string) {
+  const s = get(), n = s.nodes.find((x) => x.id === id)
+  if (!n) return
+  const r = rectOf(n), { kids, parentOf } = hierarchy(s.nodes)
+  const out = new Set((kids.get(id) ?? []).filter((k) => { const c = s.nodes.find((x) => x.id === k)!; return !inside(r, c.position.x, c.position.y) }))
+  if (!out.size) return
+  const up = parentOf.get(id) ?? null
+  set((st) => ({ nodes: st.nodes.map((x) => (out.has(x.id) ? { ...x, data: { ...x.data, parent: up } } : x)), rev: st.rev + 1 }))
+}
+
+const unionRect = (rs: Rect[]): Rect => {
+  const x = Math.min(...rs.map((r) => r.x)), y = Math.min(...rs.map((r) => r.y))
+  return { x, y, w: Math.max(...rs.map((r) => r.x + r.w)) - x, h: Math.max(...rs.map((r) => r.y + r.h)) - y }
+}
+const rectById = (id: string) => rectOf(get().nodes.find((x) => x.id === id)!)
+const topsOf = (ids: string[]) => {
+  const { parentOf } = hierarchy(get().nodes)
+  const all = new Set(ids)
+  return ids.filter((id) => { for (let p = parentOf.get(id); p; p = parentOf.get(p)) if (all.has(p)) return false; return true })
+}
+
+/** 선택한 상자들을 새 상자로 감싼다 (Ctrl+G). 위쪽에 이름을 쓸 자리를 둔다 */
 export function groupSelection() {
   const sel = selectedNodes()
   if (!sel.length) return
   const { parentOf } = hierarchy(get().nodes)
-  const ids = new Set(sel.map((n) => n.id))
-  const tops = sel.filter((n) => { for (let p = parentOf.get(n.id); p; p = parentOf.get(p)) if (ids.has(p)) return false; return true })
-  const outer = new Set(tops.map((n) => parentOf.get(n.id) ?? null))
-  const rs = tops.map((n) => rectOf(n, get().frames[n.id]))
-  const x = (Math.min(...rs.map((r) => r.x)) + Math.max(...rs.map((r) => r.x + r.w))) / 2
-  const y = (Math.min(...rs.map((r) => r.y)) + Math.max(...rs.map((r) => r.y + r.h))) / 2
-  const id = addBox({ x, y }, 'round', { fill: null, parent: outer.size === 1 ? [...outer][0] : null })
-  set((s) => ({ nodes: s.nodes.map((n) => (tops.some((t) => t.id === n.id) ? { ...n, data: { ...n.data, parent: id } } : n)) }))
-  startEditing(id)
+  const tops = topsOf(sel.map((n) => n.id))
+  const outer = new Set(tops.map((id) => parentOf.get(id) ?? null))
+  const u = unionRect(tops.map(rectById))
+  const a = snapXY({ x: u.x - 24, y: u.y - 48 }), b = snapXY({ x: u.x + u.w + 24, y: u.y + u.h + 24 })
+  const x = Math.min(a.x, u.x - 12), y = Math.min(a.y, u.y - 36)
+  const w = Math.max(b.x, u.x + u.w + 12) - x, h = Math.max(b.y, u.y + u.h + 12) - y
+  const id = addBox({ x: x + w / 2, y: y + h / 2 }, 'rect', { w, h, valign: 'top', parent: outer.size === 1 ? [...outer][0] : null }, { snap: false })
+  set((s) => ({ nodes: s.nodes.map((n) => (tops.includes(n.id) ? { ...n, data: { ...n.data, parent: id } } : n)) }))
+  startEditing(id, undefined, false)
 }
 
 // ── 움직임: 상자를 새 자리로 미끄러지듯 옮긴 뒤 포함 관계를 바꾼다 ──
@@ -323,18 +466,7 @@ export function glide(delta: Map<string, XYPosition>, done: () => void) {
   animate(0, 1, { duration: 0.35, ease: EASE, onUpdate: (t) => set(at(t)), onComplete: finish })
 }
 
-const topsOf = (ids: string[]) => {
-  const { parentOf } = hierarchy(get().nodes)
-  const all = new Set(ids)
-  return ids.filter((id) => { for (let p = parentOf.get(id); p; p = parentOf.get(p)) if (all.has(p)) return false; return true })
-}
-const unionRect = (rs: Rect[]): Rect => {
-  const x = Math.min(...rs.map((r) => r.x)), y = Math.min(...rs.map((r) => r.y))
-  return { x, y, w: Math.max(...rs.map((r) => r.x + r.w)) - x, h: Math.max(...rs.map((r) => r.y + r.h)) - y }
-}
-const rectById = (id: string) => rectOf(get().nodes.find((x) => x.id === id)!, get().frames[id])
-
-/** 선택한 상자를 한 겹 바깥으로 꺼낸다: 원래 집합 오른쪽으로 비켜 나간다 */
+/** 선택한 상자를 한 겹 바깥으로 꺼낸다: 원래 상자 오른쪽으로 비켜 나간다 */
 export function takeOut(ids: string[]) {
   const { parentOf } = hierarchy(get().nodes)
   const inner = topsOf(ids).filter((id) => parentOf.has(id))
@@ -344,7 +476,7 @@ export function takeOut(ids: string[]) {
   for (const p of new Set(inner.map((id) => parentOf.get(id)!))) {
     const group = inner.filter((id) => parentOf.get(id) === p)
     const g = unionRect(group.map(rectById)), box = rectById(p)
-    for (const id of group) delta.set(id, { x: box.x + box.w + 40 - g.x, y: 0 })
+    for (const id of group) delta.set(id, { x: box.x + box.w + 48 - g.x, y: 0 })
   }
   glide(delta, () => set((s) => ({
     nodes: s.nodes.map((n) => (delta.has(n.id) ? { ...n, data: { ...n.data, parent: parentOf.get(parentOf.get(n.id)!) ?? null } } : n)),
@@ -359,40 +491,100 @@ export function canHold(target: string, ids: string[]) {
   return !ids.some((id) => id === target || descendants(id).includes(target))
 }
 
-/** 상자들을 다른 상자 안으로: 그 안의 빈 곳(안쪽 상자들 아래)으로 미끄러져 들어간다 */
+/**
+ * '다른 상자에 넣기': 고른 상자들을 그 상자 가운데로 미끄러뜨려 넣는다.
+ * 직접 고른 명령이라, 들어갈 자리가 모자라면 그때만 바깥 상자를 그만큼 키운다
+ */
 export function moveInto(ids: string[], target: string) {
   const s = get()
-  const { kids } = hierarchy(s.nodes)
   const moved = topsOf(ids).filter((id) => s.nodes.find((n) => n.id === id)?.data.parent !== target)
   set({ picking: null, dropTarget: null })
   if (!moved.length || !canHold(target, moved)) return
   commit()
-  const g = unionRect(moved.map(rectById)), box = rectById(target)
-  const inside = (kids.get(target) ?? []).filter((id) => !moved.includes(id))
-  let to: XYPosition
-  if (inside.length) {
-    const c = unionRect(inside.map(rectById))
-    to = { x: c.x, y: c.y + c.h + 24 }
-  } else to = { x: box.x + box.w / 2 - g.w / 2, y: box.y + box.h / 2 - g.h / 2 + 16 }
+  const g = unionRect(moved.map(rectById))
+  let box = rectById(target)
+  const need = { w: g.w + 48, h: g.h + 72 }
+  if (box.w < need.w || box.h < need.h) {
+    const w = Math.max(box.w, need.w), h = Math.max(box.h, need.h)
+    patchNodes([target], { w, h }, false)
+    box = { x: box.x + box.w / 2 - w / 2, y: box.y + box.h / 2 - h / 2, w, h }
+  }
+  const to = snapXY({ x: box.x + box.w / 2 - g.w / 2, y: box.y + box.h / 2 - g.h / 2 + 12 })
   const d = { x: to.x - g.x, y: to.y - g.y }
   glide(new Map(moved.map((id) => [id, d])), () => set((st) => ({
     nodes: st.nodes.map((n) => (moved.includes(n.id) ? { ...n, data: { ...n.data, parent: target } } : n)),
   })))
 }
 
-export function startEditing(id: string) {
+// ── 글 편집 ──
+/** 두 번 눌러 편집을 시작한 자리 (BoxEditor가 커서를 거기 둔다) */
+let caretAt: { id: string; x: number; y: number } | null = null
+export const takeCaret = (id: string) => { const c = caretAt?.id === id ? caretAt : null; caretAt = null; return c }
+/** record: 실행 취소 기록을 남길지 (방금 만든 상자는 만들 때 이미 남겼다) */
+export function startEditing(id: string, at?: { x: number; y: number }, record = true) {
+  caretAt = at ? { id, ...at } : null
   if (get().editingId === id) return
-  commit()
-  set((s) => ({ editingId: id, editingEdge: null, nodes: s.nodes.map((n) => ({ ...n, selected: n.id === id })) }))
+  if (record) commit()
+  set((s) => ({
+    editingId: id, readyId: id, editingEdge: null,
+    nodes: s.nodes.map((n) => (!!n.selected === (n.id === id) ? n : { ...n, selected: n.id === id })),
+  }))
 }
 export const stopEditing = () => { if (get().editingId) set({ editingId: null, active: null }) }
 
-/** 서식 적용: 편집 중이면 현재 커서/선택 영역에, 아니면 선택된 상자 전체에 */
+/** 서식 적용: 편집 중이면 현재 커서/선택 영역에, 아니면 선택된 상자 글 전체에 */
 export function fmt(fn: Fmt) {
   const { active, editingId } = get()
   if (editingId && active && !active.isDestroyed) { fn(active.chain().focus()).run(); return }
   const ids = selectedNodes().map((n) => n.id)
-  if (ids.length) patchNodes(ids, (d) => ({ title: applyToHtml(d.title, fn), body: applyToHtml(d.body, fn) }))
+  if (ids.length) patchNodes(ids, (d) => ({ body: applyToHtml(d.body, fn) }))
+}
+
+// ── 서식 브러시 (Word처럼: 한 번 누르면 한 상자, 두 번 누르면 Esc까지 계속) ──
+export function pickLook(sticky: boolean) {
+  const n = selectedNodes()[0]
+  if (!n) return
+  const d = n.data
+  set({ painter: { sticky, look: { shape: d.shape, fill: d.fill, stroke: d.stroke, strokeWidth: d.strokeWidth, dash: d.dash, head: d.head, rule: d.rule, valign: d.valign, text: readTextLook(d.body) } } })
+}
+export function paintOnto(id: string) {
+  const p = get().painter
+  if (!p) return
+  const { text, ...box } = p.look
+  patchNodes([id], (d) => ({ ...box, body: d.body ? applyToHtml(d.body, textLookFmt(text)) : d.body }))
+  if (!p.sticky) set({ painter: null })
+}
+
+/** 고른 상자를 dx·dy만큼 (안의 상자도 함께). 잇달아 누르면 실행 취소 한 번으로 묶는다 */
+let lastNudge = 0
+export function nudge(dx: number, dy: number) {
+  const sel = selectedNodes()
+  if (!sel.length) return
+  if (Date.now() - lastNudge > 800) commit()
+  lastNudge = Date.now()
+  const { descendants } = hierarchy(get().nodes)
+  const ids = new Set(topsOf(sel.map((n) => n.id)).flatMap((id) => [id, ...descendants(id)]))
+  set((s) => ({ nodes: s.nodes.map((n) => (ids.has(n.id) ? { ...n, position: { x: n.position.x + dx, y: n.position.y + dy } } : n)), rev: s.rev + 1 }))
+}
+
+/** 방향키: 고른 상자에서 그쪽으로 가장 가까운 상자를 고른다 (엑셀의 셀 이동처럼). 고른 상자 id */
+export function selectToward(dir: 'l' | 'r' | 'u' | 'd') {
+  const s = get(), sel = selectedNodes()
+  if (!s.nodes.length) return null
+  if (!sel.length) { selectOnly([s.nodes[0].id]); return s.nodes[0].id }
+  const c = sel[sel.length - 1].position
+  let best: { id: string; score: number } | null = null
+  for (const n of s.nodes) {
+    if (n.selected) continue
+    const dx = n.position.x - c.x, dy = n.position.y - c.y
+    const along = dir === 'r' ? dx : dir === 'l' ? -dx : dir === 'd' ? dy : -dy
+    const across = Math.abs(dir === 'l' || dir === 'r' ? dy : dx)
+    if (along <= 1 || across > along * 2) continue
+    const score = along + across * 2
+    if (!best || score < best.score) best = { id: n.id, score }
+  }
+  if (best) selectOnly([best.id])
+  return best?.id ?? null
 }
 
 // ── 복사 / 붙여넣기 ──
@@ -480,7 +672,7 @@ export function setPaper(kind: PaperKind): boolean {
   if (kind === 'canvas') { commit(); set((st) => ({ paper: null, rev: st.rev + 1 })); return false }
   if (!s.paper) {
     commit()
-    const r = fitToPaper(newPaper(kind === 'a4-land'), s.nodes, s.frames)
+    const r = fitToPaper(newPaper(kind === 'a4-land'), s.nodes)
     set((st) => ({ paper: r.paper, nodes: r.nodes, rev: st.rev + 1 }))
     return r.overflow
   }

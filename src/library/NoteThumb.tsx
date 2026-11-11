@@ -2,7 +2,7 @@ import { memo } from 'react'
 import { INK, SURFACE, noteLook, themeMap, readable, type Theme } from '../lib/color'
 import { plain } from '../lib/db'
 import { pageSize } from '../lib/pages'
-import { hierarchy, type Frame, type Rect } from '../lib/sets'
+import { hierarchy, type Rect } from '../lib/sets'
 import { isMemo, shapePath } from '../lib/shapes'
 import type { BoxNode, LogicEdge, Note } from '../lib/types'
 
@@ -18,11 +18,11 @@ export const NoteThumb = memo(function NoteThumb({ note, theme: appTheme }: { no
 })
 
 /** 상자·선 그림. area가 있으면 그 영역(페이지)만 종이처럼 그린다 */
-export function Thumb({ nodes, edges, theme, area, frames, ground }: {
-  nodes: BoxNode[]; edges: LogicEdge[]; theme: Theme; area?: Rect; frames?: Record<string, Frame>; ground?: string
+export function Thumb({ nodes, edges, theme, area, ground }: {
+  nodes: BoxNode[]; edges: LogicEdge[]; theme: Theme; area?: Rect; ground?: string
 }) {
   const rects = new Map(nodes.map((n) => {
-    const w = frames?.[n.id]?.w ?? n.measured?.width ?? n.data.w ?? 140, h = frames?.[n.id]?.h ?? n.measured?.height ?? n.data.h ?? 48
+    const w = n.data.w ?? n.measured?.width ?? 140, h = n.data.h ?? n.measured?.height ?? 48
     return [n.id, { x: n.position.x - w / 2, y: n.position.y - h / 2, w, h }]
   }))
   let vb: string
@@ -47,15 +47,15 @@ export function Thumb({ nodes, edges, theme, area, frames, ground }: {
       })}
       {[...nodes].sort((a, b) => depth(a.id) - depth(b.id)).map((n) => {
         const r = rects.get(n.id)!, d = n.data, set = kids.has(n.id), memo = isMemo(d.shape)
-        // 집합은 바탕 없이 테두리만, 글은 위쪽에. 메모지는 글을 왼쪽 위에
-        const fill = d.fill ? themeMap(d.fill, theme) : set ? 'none' : SURFACE[theme]
+        // 안에 상자가 있으면 글은 위쪽에. 메모지는 글을 왼쪽 위에
+        const fill = d.fill ? themeMap(d.fill, theme) : SURFACE[theme]
         const text = plain(d.title) || plain(d.body)
         return (
           <g key={n.id} transform={`translate(${r.x} ${r.y})`}>
             <path d={shapePath(d.shape, r.w, r.h)} fill={fill} stroke={d.dash === 'none' ? 'none' : themeMap(d.stroke ?? INK.light, theme)} strokeWidth={set ? 2 : 1} vectorEffect="non-scaling-stroke" />
             {text && (
               <text x={memo ? 14 : r.w / 2} y={set || memo ? 22 : r.h / 2} textAnchor={memo ? 'start' : 'middle'} dominantBaseline="central" fontSize={14} fontWeight={600}
-                fill={readable('#1C1C1E', fill === 'none' ? ground ?? SURFACE[theme] : fill)}>
+                fill={readable('#1C1C1E', fill)}>
                 {text.length > 22 ? text.slice(0, 21) + '…' : text}
               </text>
             )}

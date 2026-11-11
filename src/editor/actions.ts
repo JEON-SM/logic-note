@@ -30,7 +30,8 @@ export async function insertFiles(files: File[], at?: XYPosition) {
   if (!items.length) return
   const target = !at && single()
   if (target) patchNodes([target.id], (d) => ({ media: [...d.media, ...items] }))
-  else addBox(at ?? center(), 'rect', { media: items })
+  // 그림에 맞춰 한 번 잰 뒤 그 크기로 고정
+  else addBox(at ?? center(), 'rect', { media: items, w: null, h: null })
 }
 
 export async function insertLink(url?: string, at?: XYPosition) {
@@ -39,27 +40,29 @@ export async function insertLink(url?: string, at?: XYPosition) {
   const html = `<p><a href="${esc(u.trim())}">${esc(u.trim())}</a></p>`
   const target = !at && single()
   if (target) patchNodes([target.id], (d) => ({ body: d.body + html }))
-  else addBox(at ?? center(), 'round', { body: html })
+  else addBox(at ?? center(), 'rect', { body: html, w: null, h: null })
 }
 
-/** 붙여넣은 글로 상자 만들기. 마크다운이면 서식으로 바꾸고, 첫 줄이 '# 제목'이면 상자 제목으로 */
+/** 붙여넣은 글로 상자 만들기 (글에 맞춘 크기). 마크다운이면 서식으로 바꾸고, 첫 줄이 '# 제목'이면 제목 줄 서식으로 */
 export function insertText(text: string, at?: XYPosition) {
-  if (!looksLikeMarkdown(text)) return addBox(at ?? center(), 'rect', { body: text.split(/\r?\n/).map((l) => `<p>${esc(l)}</p>`).join('') })
+  const auto = { w: null, h: null }
+  if (!looksLikeMarkdown(text)) return addBox(at ?? center(), 'rect', { ...auto, body: text.split(/\r?\n/).map((l) => `<p>${esc(l)}</p>`).join('') })
   const m = text.match(/^\s*#{1,6}\s+(.+)\r?\n?([\s\S]*)$/)
-  return addBox(at ?? center(), 'rect', { title: m ? `<p>${esc(m[1].trim())}</p>` : '', body: markdownToHtml(m ? m[2] : text) })
+  return addBox(at ?? center(), 'rect', { ...auto, ...(m && { head: true }), body: (m ? `<p>${esc(m[1].trim())}</p>` : '') + markdownToHtml(m ? m[2] : text) })
 }
 
-/** 선택한 상자 옆에 연결된 새 상자 (Tab) */
+/** 선택한 상자 오른쪽에 같은 크기·모양으로 연결된 새 상자 (Tab). 이미 있으면 그 아래로 */
 export function addChild() {
   const from = single()
   if (!from) return
-  const w = from.measured?.width ?? 140
+  const w = from.data.w ?? from.measured?.width ?? 144, h = from.data.h ?? from.measured?.height ?? 48
   const siblings = useEd.getState().edges.filter((e) => e.source === from.id && handleSide(from.data, e.sourceHandle) === 'r').length
-  const id = addBox({ x: from.position.x + w / 2 + 150, y: from.position.y + siblings * 90 }, from.data.shape, {
-    fill: from.data.fill, stroke: from.data.stroke, strokeWidth: from.data.strokeWidth, dash: from.data.dash,
+  const id = addBox({ x: from.position.x + w + 72, y: from.position.y + siblings * (h + 24) }, from.data.shape, {
+    w, h, fill: from.data.fill, stroke: from.data.stroke, strokeWidth: from.data.strokeWidth, dash: from.data.dash,
+    head: from.data.head, rule: from.data.rule, valign: from.data.valign, parent: from.data.parent ?? null,
   })
   addLink(from.id, 'r', id, 'l', false)
-  startEditing(id)
+  startEditing(id, undefined, false)
 }
 
 /** 가져온 도식을 지금 노트에 넣는다: 기존 상자와 겹치지 않게 오른쪽에 두고, 그쪽으로 화면을 옮긴다 */

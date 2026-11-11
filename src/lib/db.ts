@@ -4,14 +4,23 @@ import { t } from '../lib/i18n'
 
 export interface MediaRec { id: string; blob: Blob; type: string; driveId?: string }
 export interface PreviewRec { url: string; data: LinkMeta | null; at: number }
+/** 새 상자 방식으로 바꾸기 전 노트 원본 (이 기기에만, 노트마다 한 번) */
+export interface BackupRec { id: string; note: Note; at: number }
 
 export const db = new Dexie('logic-note') as Dexie & {
   folders: EntityTable<Folder, 'id'>
   notes: EntityTable<Note, 'id'>
   media: EntityTable<MediaRec, 'id'>
   previews: EntityTable<PreviewRec, 'url'>
+  backups: EntityTable<BackupRec, 'id'>
 }
 db.version(1).stores({ folders: 'id, parentId', notes: 'id, folderId, updatedAt', media: 'id', previews: 'url' })
+db.version(2).stores({ folders: 'id, parentId', notes: 'id, folderId, updatedAt', media: 'id', previews: 'url', backups: 'id' })
+
+/** 노트를 처음 바꾸기 전에 원본을 남긴다 (이미 있으면 그대로) */
+export async function backupOnce(note: Note) {
+  if (!(await db.backups.get(note.id))) await db.backups.put({ id: note.id, note: structuredClone(note), at: Date.now() })
+}
 
 export const uid = () => crypto.randomUUID()
 
