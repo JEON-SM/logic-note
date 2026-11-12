@@ -179,9 +179,11 @@ export function redo() {
   set((s) => ({ future: s.future.slice(0, -1), past: [...s.past, snap()], ...f, editingId: null, rev: bump() }))
 }
 
-// ── 모눈에 맞추기 (Alt를 누르고 있으면 자유롭게) ──
+// ── 모눈에 맞추기: 설정(모눈에 맞추기)으로 켜고 끈다. Alt를 누르고 있는 동안은 반대로 ──
 let free = false
 export const setFree = (v: boolean) => { free = v }
+/** 지금은 모눈에 맞추지 않는다 (맞추기를 꺼 두었으면 Alt를 누를 때만 맞춘다) */
+const loose = () => (useSettings.getState().snap === false) !== free
 /** 배경 무늬의 칸 크기 (줄 무늬는 줄 간격) */
 const gridStep = () => {
   const bg = get().bg, s = bg.endsWith('-wide') ? 48 : 24
@@ -189,7 +191,7 @@ const gridStep = () => {
 }
 /** 점을 가까운 모눈 교차점으로. 용지 노트는 그 페이지의 왼쪽 위가 기준 */
 export function snapXY(p: XYPosition): XYPosition {
-  if (free) return p
+  if (loose()) return p
   const g = gridStep(), paper = get().paper
   const o = paper ? pageOrigin(paper, pageAt(paper, p)) : { x: 0, y: 0 }
   return { x: o.x + Math.round((p.x - o.x) / g.x) * g.x, y: o.y + Math.round((p.y - o.y) / g.y) * g.y }
@@ -201,7 +203,7 @@ export function snapCenter(c: XYPosition, w: number, h: number): XYPosition {
 }
 /** 크기를 바꾸는 중: 움직인 변만 모눈에 */
 function snapEdges(r: Rect, r0: Rect): Rect {
-  if (free) return r
+  if (loose()) return r
   const a = snapXY({ x: r.x, y: r.y }), b = snapXY({ x: r.x + r.w, y: r.y + r.h })
   let L = r.x, T = r.y, R = r.x + r.w, B = r.y + r.h
   if (Math.abs(L - r0.x) > 0.5) L = Math.min(a.x, R - 24)
@@ -248,7 +250,7 @@ export function onNodesChange(changes: NodeChange<BoxNode>[]) {
   // React Flow는 놓을 때 맞추기 전 자리를 한 번 더 보내므로(dragging: false) 그것도 맞춘다
   const isDrag = (c: NodeChange<BoxNode>) => c.type === 'position' && typeof c.dragging === 'boolean' && !!c.position && !center.has(c.id)
   const drags = ch.filter(isDrag) as { id: string; position: XYPosition }[]
-  if (drags.length && !free) {
+  if (drags.length && !loose()) {
     const lead = byId.get(drags[0].id)
     if (lead) {
       const r = rectOf(lead), p = drags[0].position, to = snapCenter(p, r.w, r.h)
@@ -565,6 +567,71 @@ export function nudge(dx: number, dy: number) {
   const { descendants } = hierarchy(get().nodes)
   const ids = new Set(topsOf(sel.map((n) => n.id)).flatMap((id) => [id, ...descendants(id)]))
   set((s) => ({ nodes: s.nodes.map((n) => (ids.has(n.id) ? { ...n, position: { x: n.position.x + dx, y: n.position.y + dy } } : n)), rev: s.rev + 1 }))
+}
+
+// ── 맞춤·배분·같은 크기·순서 (엑셀·파워포인트의 '정렬'). 안의 상자는 바깥 상자와 함께 움직인다 ──
+const pickedTops = () => topsOf(selectedNodes().map((n) => n.id)).map((id) => ({ id, r: rectById(id) }))
+export type AlignKind = 'left' | 'center' | 'right' | 'top' | 'middle' | 'bottom'
+/** 고른 상자들의 한쪽 변(또는 가운데)을 선택 영역 기준으로 맞춘다 */
+export function alignBoxes(kind: AlignKind) {
+  const ps = pickedTops()
+  if (ps.length < 2) return
+  const u = unionRect(ps.map((p) => p.r))
+  const delta = new Map<string, XYPosition>()
+  for (const { id, r } of ps) {
+    const dx = kind === 'left' ? u.x - r.x : kind === 'right' ? u.x + u.w - r.x - r.w : kind === 'center' ? u.x + u.w / 2 - r.x - r.w / 2 : 0
+    const dy = kind === 'top' ? u.y - r.y : kind === 'bottom' ? u.y + u.h - r.y - r.h : kind === 'middle' ? u.y + u.h / 2 - r.y - r.h / 2 : 0
+    if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) delta.set(id, { x: dx, y: dy })
+  }
+  if (!delta.size) return
+  commit()
+  glide(delta, () => {})
+}
+/** 양 끝 상자는 그대로 두고, 사이 간격이 같아지게 (상자 3개 이상) */
+export function distributeBoxes(axis: 'h' | 'v') {
+  const ps = pickedTops()
+  if (ps.length < 3) return
+  const k = axis === 'h' ? 'x' : 'y', s = axis === 'h' ? 'w' : 'h'
+  ps.sort((a, b) => a.r[k] + a.r[s] / 2 - b.r[k] - b.r[s] / 2)
+  const first = ps[0].r, last = ps[ps.length - 1].r
+  const gap = (last[k] + last[s] - first[k] - ps.reduce((a, p) => a + p.r[s], 0)) / (ps.length - 1)
+  const delta = new Map<string, XYPosition>()
+  let at = first[k]
+  for (const p of ps) {
+    const d = at - p.r[k]
+    if (Math.abs(d) > 0.5) delta.set(p.id, axis === 'h' ? { x: d, y: 0 } : { x: 0, y: d })
+    at += p.r[s] + gap
+  }
+  if (!delta.size) return
+  commit()
+  glide(delta, () => {})
+}
+/** 고른 상자들을 가장 큰 것의 폭·높이로. 왼쪽 위 모서리는 그대로 (맞춤 뒤에 써도 줄이 흐트러지지 않게) */
+export function matchSize(what: 'w' | 'h' | 'both') {
+  const sel = selectedNodes()
+  if (sel.length < 2) return
+  const rs = new Map(sel.map((n) => [n.id, rectOf(n)]))
+  const w = Math.max(...[...rs.values()].map((r) => r.w)), h = Math.max(...[...rs.values()].map((r) => r.h))
+  commit()
+  set((s) => ({
+    nodes: s.nodes.map((n) => {
+      const r = rs.get(n.id)
+      if (!r) return n
+      const nw = what === 'h' ? r.w : w, nh = what === 'w' ? r.h : h
+      return { ...n, position: { x: r.x + nw / 2, y: r.y + nh / 2 }, data: { ...n.data, w: nw, h: nh, wrap: null } }
+    }),
+    rev: s.rev + 1,
+  }))
+}
+/** 맨 앞으로·맨 뒤로 (같은 겹에 있는 상자끼리 그리는 순서) */
+export function reorder(front: boolean) {
+  const ids = new Set(selectedNodes().map((n) => n.id))
+  if (!ids.size) return
+  commit()
+  set((s) => {
+    const a = s.nodes.filter((n) => ids.has(n.id)), b = s.nodes.filter((n) => !ids.has(n.id))
+    return { nodes: front ? [...b, ...a] : [...a, ...b], rev: s.rev + 1 }
+  })
 }
 
 /** 방향키: 고른 상자에서 그쪽으로 가장 가까운 상자를 고른다 (엑셀의 셀 이동처럼). 고른 상자 id */

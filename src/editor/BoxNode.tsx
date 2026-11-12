@@ -37,7 +37,14 @@ export const BoxNode = memo(function BoxNode({ id, data, selected }: NodeProps<B
   const host = useEd((s) => s.hosts.has(id))
   const draft = useEd((s) => (s.portDraft?.id === id ? s.portDraft : null))
   const syncHandles = useUpdateNodeInternals()
-  useEffect(() => syncHandles(id), [id, data.ports, syncHandles])
+  // 연결점이 바뀔 때만 다시 잰다. 처음 그릴 때는 React Flow가 한꺼번에 재므로 건너뛴다
+  // (상자마다 따로 재면 노트를 열 때 '전체 보기'가 먼저 잰 상자 하나에만 맞춰진다)
+  const ports = useRef(data.ports)
+  useEffect(() => {
+    if (ports.current === data.ports) return
+    ports.current = data.ports
+    syncHandles(id)
+  }, [id, data.ports, syncHandles])
   // 하나만 골랐을 때만 크기 손잡이를 둔다 (고르지 않은 상자는 셀 필요도 없다)
   const solo = useEd((s) => selected && s.nodes.reduce((k, n) => k + (n.selected ? 1 : 0), 0) === 1)
   const box = useRef<HTMLDivElement>(null)
@@ -122,7 +129,8 @@ export const BoxNode = memo(function BoxNode({ id, data, selected }: NodeProps<B
     <div ref={box} className={cls('box', `tone-${tone}`, memoKind && 'memo')}
       style={{ width: w, height: h, ['--ink' as string]: readable('#1C1C1E', fill) }}>
       <svg className="box-shape" width={w} height={h}>
-        {selected && <path className="box-halo" d={d} fill="none" stroke={ACCENT} strokeWidth={sw + 4} strokeLinejoin="miter" />}
+        {/* 늘 그려 두고 투명도만 바꾼다: 고르면 스며들듯 나타나고, 풀면 사라지는 모습이 보인다 */}
+        <path className={cls('box-halo', selected && 'on')} d={d} fill="none" stroke={ACCENT} strokeWidth={sw + 4} strokeLinejoin="miter" />
         <path className="box-main" d={d} fill={fill} stroke={data.dash === 'none' ? 'none' : stroke} strokeWidth={sw}
           strokeDasharray={data.dash === 'dashed' ? '6 4' : undefined} strokeLinejoin="miter" />
         {memoKind && <path d={`M${w} ${h - fold}L${w - fold} ${h - fold}L${w - fold} ${h}Z`} fill="var(--ink)" fillOpacity={0.12} />}

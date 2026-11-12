@@ -21,20 +21,20 @@ import { copySelection, fmt, groupSelection, pasteClip, patchEdges, patchNodes, 
 import { t } from '../lib/i18n'
 
 /** 모양 바꾸기: 줄 메모지는 메모지 + 줄 서식 */
-const shapePatch = (s: Shape): Partial<BoxData> => { const n = normalizeShape(s); return { shape: n.shape, ...(s === 'memo-lined' ? { rule: 'lines' } : s === 'memo' ? { rule: null } : {}) } }
-const isShapeOn = (d: BoxData, s: Shape) => (s === 'memo-lined' ? d.shape === 'memo' && d.rule === 'lines' : s === 'memo' ? d.shape === 'memo' && d.rule !== 'lines' : d.shape === s)
-const RULES: { id: Rule | null; label: string }[] = [
+export const shapePatch = (s: Shape): Partial<BoxData> => { const n = normalizeShape(s); return { shape: n.shape, ...(s === 'memo-lined' ? { rule: 'lines' } : s === 'memo' ? { rule: null } : {}) } }
+export const isShapeOn = (d: BoxData, s: Shape) => (s === 'memo-lined' ? d.shape === 'memo' && d.rule === 'lines' : s === 'memo' ? d.shape === 'memo' && d.rule !== 'lines' : d.shape === s)
+export const RULES: { id: Rule | null; label: string }[] = [
   { id: null, label: t('무늬 없음') }, { id: 'lines', label: t('줄') }, { id: 'grid', label: t('모눈') }, { id: 'dots', label: t('점') },
 ]
-const VALIGNS: { id: VAlign; label: string; icon: React.ReactNode }[] = [
+export const VALIGNS: { id: VAlign; label: string; icon: React.ReactNode }[] = [
   { id: 'top', label: t('위쪽'), icon: <AlignVerticalJustifyStart size={16} /> },
   { id: 'middle', label: t('가운데 (세로)'), icon: <AlignVerticalJustifyCenter size={16} /> },
   { id: 'bottom', label: t('아래쪽'), icon: <AlignVerticalJustifyEnd size={16} /> },
 ]
 
-const S = { size: 18, strokeWidth: 1.6 }
+export const S = { size: 18, strokeWidth: 1.6 }
 
-const LineIcon = ({ dashed, arrow = 'none', kind = 'straight' }: { dashed?: boolean; arrow?: EdgeData['arrow']; kind?: EdgeData['kind'] }) => (
+export const LineIcon = ({ dashed, arrow = 'none', kind = 'straight' }: { dashed?: boolean; arrow?: EdgeData['arrow']; kind?: EdgeData['kind'] }) => (
   <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
     <path d={kind === 'step' ? 'M3 4H9V14H15' : kind === 'bezier' ? 'M3 13C9 13 9 5 15 5' : 'M3 9H15'} strokeDasharray={dashed ? '2.5 2.5' : undefined} />
     {arrow !== 'none' && <path d={kind === 'bezier' ? 'M12 3L15 5L12.6 7.6' : 'M12 6L15 9L12 12'} transform={kind === 'step' ? 'translate(0 5)' : undefined} />}
@@ -50,7 +50,7 @@ export function Toolbar() {
   return <ToolbarBody selN={n} selE={e} />
 }
 
-const ToolbarBody = memo(function ToolbarBody({ selN, selE }: { selN: string[]; selE: string[] }) {
+export const ToolbarBody = memo(function ToolbarBody({ selN, selE }: { selN: string[]; selE: string[] }) {
   const key = selN.length ? 'node' : selE.length ? 'edge' : 'create'
   return (
     <div className="toolbar">
@@ -98,7 +98,7 @@ function CreateTools() {
   )
 }
 
-function EdgeStyleItems({ d, set }: { d: EdgeData; set: (p: Partial<EdgeData>) => void }) {
+export function EdgeStyleItems({ d, set }: { d: EdgeData; set: (p: Partial<EdgeData>) => void }) {
   return (
     <>
       <Item icon={<LineIcon kind="bezier" />} checked={d.kind === 'bezier'} onSelect={() => set({ kind: 'bezier' })}>{t('곡선')}</Item>
@@ -114,7 +114,7 @@ function EdgeStyleItems({ d, set }: { d: EdgeData; set: (p: Partial<EdgeData>) =
   )
 }
 
-function useActiveMarks() {
+export function useActiveMarks() {
   const editor = useEd((s) => (s.editingId ? s.active : null))
   return useEditorState({
     editor,
@@ -127,7 +127,7 @@ function useActiveMarks() {
 }
 
 /** 글자 크기: 목록에서 고르거나 '10p'처럼 직접 입력 (단위 없으면 pt) */
-function SizePicker({ current }: { current?: string }) {
+export function SizePicker({ current }: { current?: string }) {
   const pt = sizeInPt(current)
   const [v, setV] = useState('')
   const [bad, setBad] = useState(false)
@@ -234,7 +234,7 @@ function NodeTools({ ids }: { ids: string[] }) {
 }
 
 /** 서식 브러시 (Word처럼): 한 번 누르면 다음 상자 하나에, 두 번 누르면 Esc까지 여러 상자에 */
-function Painter() {
+export function Painter() {
   const on = useEd((s) => !!s.painter)
   return (
     <IB label={t('서식 복사 (두 번 누르면 계속)')} on={on}

@@ -21,7 +21,7 @@ import { BoxNode } from './BoxNode'
 import { CanvasMenu } from './CanvasMenu'
 import { DefaultsDialog, openDefaults } from './DefaultsDialog'
 import { LogicEdge } from './LogicEdge'
-import { Toolbar } from './Toolbar'
+import { Ribbon } from './Ribbon'
 import { ExportDialog, openExport } from './ExportDialog'
 import { PageIndicator, PageSorter, PagesLayer, openPages } from './Pages'
 import { usePageNav, usePageWheel, useSnapToPage } from './pageNav'
@@ -92,7 +92,7 @@ export default function EditorPage({ id }: { id: string }) {
     <ReactFlowProvider>
       <div className="editor">
         <TopBar id={id} />
-        <Toolbar />
+        <Ribbon />
         <ExportDialog />
         <DefaultsDialog />
         <PageSorter />
@@ -197,7 +197,7 @@ function Canvas({ id, viewport }: { id: string; viewport?: Viewport }) {
   /** Shift를 누르고 있으면 빈 곳을 끌어 여러 개 고르기 */
   const [shift, setShift] = useState(false)
   /** 끌어서 그리는 중인 상자 (화면 좌표) */
-  const [draft, setDraft] = useState<{ x: number; y: number; w: number; h: number; label: string } | null>(null)
+  const [draft, setDraft] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
   const drawingRef = useRef(false)
 
   const center = useCallback(() => {
@@ -350,12 +350,12 @@ function Canvas({ id, viewport }: { id: string; viewport?: Viewport }) {
       const a = snapXY(toFlow(Math.min(x0, x1), Math.min(y0, y1))), b = snapXY(toFlow(Math.max(x0, x1), Math.max(y0, y1)))
       return { x: a.x, y: a.y, w: Math.max(24, b.x - a.x), h: Math.max(24, b.y - a.y) }
     }
+    // 그리는 동안은 윈도우 선택 상자처럼 마우스를 그대로 따라간다 (모눈 맞춤은 놓을 때)
     const move = (ev: PointerEvent) => {
       setFree(ev.altKey)
       if (!moved && Math.hypot(ev.clientX - x0, ev.clientY - y0) < 5) return
       moved = true
-      const r = flowRect(ev.clientX, ev.clientY), p = rf.flowToScreenPosition({ x: r.x, y: r.y }), z = rf.getZoom()
-      setDraft({ x: p.x, y: p.y, w: r.w * z, h: r.h * z, label: `${Math.round(r.w)} × ${Math.round(r.h)}` })
+      setDraft({ x: Math.min(x0, ev.clientX), y: Math.min(y0, ev.clientY), w: Math.abs(ev.clientX - x0), h: Math.abs(ev.clientY - y0) })
     }
     const swallow = (ev: Event) => { ev.stopPropagation(); ev.preventDefault() }
     const up = (ev: PointerEvent) => {
@@ -453,11 +453,7 @@ function Canvas({ id, viewport }: { id: string; viewport?: Viewport }) {
         {!pattern && <Background variant={BackgroundVariant.Dots} gap={1000} size={0} bgColor={paper ? DESK[theme] : look.ground} />}
         {paper && <PagesLayer paper={paper} bg={bg} />}
       </ReactFlow>
-      {draft && (
-        <div className="draw-rect" style={{ left: draft.x, top: draft.y, width: draft.w, height: draft.h }}>
-          <span className="draw-size">{draft.label}</span>
-        </div>
-      )}
+      {draft && <div className="draw-rect" style={{ left: draft.x, top: draft.y, width: draft.w, height: draft.h }} />}
       {!nodes.length && (
         <div className="empty-note">
           <div className="hint">{t('빈 곳을 끌어서 상자를 그리세요')}</div>

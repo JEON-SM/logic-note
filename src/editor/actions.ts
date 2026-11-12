@@ -3,9 +3,10 @@ import { addMediaFile, isUrl } from '../lib/media'
 import { promptText } from '../ui/Dialogs'
 import { looksLikeDiagram, parseDiagram, type Imported } from '../lib/diagram'
 import { looksLikeMarkdown, markdownToHtml } from '../lib/rich'
-import type { MediaItem } from '../lib/types'
+import type { BoxData, MediaItem, Shape } from '../lib/types'
 import { openImport } from '../ui/ImportDialog'
 import { handleSide } from '../lib/shapes'
+import { boxAround, rectOf } from '../lib/sets'
 import { addBox, addLink, commit, patchNodes, selectedNodes, startEditing, useEd } from './store'
 import { t } from '../lib/i18n'
 
@@ -62,6 +63,15 @@ export function addChild() {
     head: from.data.head, rule: from.data.rule, valign: from.data.valign, parent: from.data.parent ?? null,
   })
   addLink(from.id, 'r', id, 'l', false)
+  startEditing(id, undefined, false)
+}
+
+/** 리본 '삽입'의 미리 만든 상자: 화면 가운데에 놓고 바로 글을 쓴다. 다른 상자 안에 완전히 들어가면 (그린 상자처럼) 그 안으로 */
+export function addPreset(shape: Shape, patch: Partial<BoxData>) {
+  const id = addBox(center(), shape, patch)
+  const s = useEd.getState(), n = s.nodes.find((x) => x.id === id)
+  const parent = n && boxAround(s.nodes.filter((x) => x.id !== id), rectOf(n))
+  if (parent) useEd.setState((st) => ({ nodes: st.nodes.map((x) => (x.id === id ? { ...x, data: { ...x.data, parent } } : x)) }))
   startEditing(id, undefined, false)
 }
 
