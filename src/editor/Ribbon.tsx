@@ -3,12 +3,11 @@ import { useReactFlow, useStore } from '@xyflow/react'
 import { useEditorState } from '@tiptap/react'
 import { useShallow } from 'zustand/react/shallow'
 import {
-  AArrowDown, AArrowUp, AlignCenter, AlignCenterHorizontal, AlignCenterVertical, AlignEndHorizontal, AlignEndVertical, AlignHorizontalDistributeCenter,
-  AlignLeft, AlignRight, AlignStartHorizontal, AlignStartVertical, AlignVerticalDistributeCenter, Baseline, Bold, BoxSelect, BringToFront, ChevronDown,
-  ChevronUp, ClipboardPaste, Columns2, Copy, CopyPlus, Files, Film, Frame, GitBranchPlus, Group as GroupIcon, Hand, Heading, Highlighter, ImagePlus, Import,
-  Infinity as InfinityIcon, Italic, LayoutTemplate, Link2, List, ListChecks, ListOrdered, ListTodo, LogIn, Magnet, Maximize, Maximize2, Moon, NotebookPen,
-  PaintBucket, Paintbrush, Palette, PanelTop, RectangleHorizontal, RectangleVertical, RemoveFormatting, Scaling, Scissors, SendToBack, Square, SquarePlus,
-  StickyNote, StretchHorizontal, StretchVertical, Strikethrough, Sun, Tag, Trash2, Type, Underline, Ungroup, ZoomIn, ZoomOut,
+  AArrowDown, AArrowUp, AlignCenter, AlignLeft, AlignRight, Baseline, Bold, BoxSelect, BringToFront, ChevronDown,
+  ChevronUp, ClipboardPaste, Columns2, Copy, CopyPlus, Eraser, Files, Film, Frame, GitBranchPlus, Group as GroupIcon, Hand, Heading, Highlighter, ImagePlus, Import,
+  Infinity as InfinityIcon, Italic, LayoutTemplate, Link2, List, ListChecks, ListOrdered, ListTodo, LogIn, Magnet, Maximize, Moon, NotebookPen,
+  PaintBucket, Paintbrush, Palette, PanelTop, RectangleHorizontal, RectangleVertical, RemoveFormatting, Ruler, Scaling, Scissors, SendToBack, Square, SquarePlus,
+  StickyNote, Strikethrough, Sun, Tag, Trash2, Type, Underline, Ungroup, Waypoints, ZoomIn, ZoomOut,
 } from 'lucide-react'
 import { GROUNDS, HIGHLIGHTS, INK, SURFACE, groundLook, readable, themeMap } from '../lib/color'
 import { pickFiles } from '../lib/media'
@@ -25,9 +24,10 @@ import { openDefaults } from './DefaultsDialog'
 import { openPages } from './Pages'
 import { usePageNav } from './pageNav'
 import {
-  CLIP_MARK, alignBoxes, copySelection, cutSelection, distributeBoxes, fmt, groupSelection, matchSize, paperKind, pasteClip, patchEdges, patchNodes,
-  pickLook, reorder, selectOnly, setPageSide, setPaper, takeOut, useEd, useLook, type AlignKind, type PaperKind,
+  CLIP_MARK, addBend, alignBoxes, clearBends, copySelection, cutSelection, distributeBoxes, fmt, groupSelection, matchSize, paperKind, pasteClip, patchEdges,
+  patchNodes, pickLook, reorder, selectOnly, setPageSide, setPaper, takeOut, useEd, useLook, type PaperKind,
 } from './store'
+import { ALIGN_LIST, SIZE_LIST, SPREAD_LIST } from './aligns'
 import { LineIcon, RULES, S, SizePicker, ToolbarBody, VALIGNS, isShapeOn, shapePatch, useActiveMarks } from './Toolbar'
 import { t } from '../lib/i18n'
 
@@ -394,15 +394,22 @@ function LinesTab({ ids }: { ids: string[] }) {
   const sel = useEd((s) => s.edges.find((e) => e.id === ids[0])?.data)
   const d: EdgeData = ids.length ? { ...defaultEdge(), ...sel } : style
   const set = (p: Partial<EdgeData>) => (ids.length ? patchEdges(ids, p) : useEd.setState((s) => ({ edgeStyle: { ...s.edgeStyle, ...p } })))
+  // 곡선·직선·꺾은선을 고르면 손으로 꺾은 점은 지운다 (고른 모양이 보이게)
+  const kind = (k: EdgeData['kind']) => set(ids.length ? { kind: k, points: null } : { kind: k })
+  const bent = useEd((s) => s.edges.some((e) => ids.includes(e.id) && !!e.data?.points?.length))
   return (
     <>
       <Grp label={t('적용 대상')}>
         <div className="rb-note">{ids.length ? `${t('고른 선')} (${ids.length})` : t('새로 그릴 선')}</div>
       </Grp>
       <Grp label={t('선 모양')}>
-        <Big icon={<LineIcon kind="bezier" />} label={t('곡선')} on={d.kind === 'bezier'} onClick={() => set({ kind: 'bezier' })} />
-        <Big icon={<LineIcon kind="straight" />} label={t('직선')} on={d.kind === 'straight'} onClick={() => set({ kind: 'straight' })} />
-        <Big icon={<LineIcon kind="step" />} label={t('꺾은선')} on={d.kind === 'step'} onClick={() => set({ kind: 'step' })} />
+        <Big icon={<LineIcon kind="bezier" />} label={t('곡선')} on={!d.points?.length && d.kind === 'bezier'} onClick={() => kind('bezier')} />
+        <Big icon={<LineIcon kind="straight" />} label={t('직선')} on={!d.points?.length && d.kind === 'straight'} onClick={() => kind('straight')} />
+        <Big icon={<LineIcon kind="step" />} label={t('꺾은선')} on={!d.points?.length && d.kind === 'step'} onClick={() => kind('step')} />
+      </Grp>
+      <Grp label={t('꺾은 점')} off={!ids.length}>
+        <Big icon={<Waypoints {...BI} />} label={t('꺾기')} tip={t('꺾은 점 더하기 (고른 선 가운데의 작은 점을 끌어도 돼요)')} onClick={() => addBend(ids)} />
+        <Big icon={<Eraser {...BI} />} label={t('곧게')} tip={t('꺾은 점 모두 지우기')} disabled={!bent} onClick={() => clearBends(ids)} />
       </Grp>
       <Grp label={t('끝 모양')}>
         <Big icon={<LineIcon arrow="end" />} label={t('화살표')} on={d.arrow === 'end'} onClick={() => set({ arrow: 'end' })} />
@@ -434,20 +441,19 @@ function LinesTab({ ids }: { ids: string[] }) {
 }
 
 // ── 배치: 맞춤 · 배분 · 같은 크기 · 순서 · 상자 안의 상자 · 모눈 ──
-const ALIGNS: { id: AlignKind; label: string; icon: ReactNode }[] = [
-  { id: 'left', label: t('왼쪽'), icon: <AlignStartVertical {...SI} /> },
-  { id: 'center', label: t('가운데'), icon: <AlignCenterVertical {...SI} /> },
-  { id: 'right', label: t('오른쪽'), icon: <AlignEndVertical {...SI} /> },
-  { id: 'top', label: t('위쪽'), icon: <AlignStartHorizontal {...SI} /> },
-  { id: 'middle', label: t('가운데 (세로)'), icon: <AlignCenterHorizontal {...SI} /> },
-  { id: 'bottom', label: t('아래쪽'), icon: <AlignEndHorizontal {...SI} /> },
-]
-
 function SnapBig() {
   const snap = useSettings((s) => s.snap !== false)
   return (
     <Big icon={<Magnet {...BI} />} label={t('모눈에 맞추기')} on={snap} tip={t('모눈에 맞추기 — 끄면 자유롭게 놓여요 (Alt를 누르는 동안은 반대로)')}
       onClick={() => { setSettings({ snap: !snap }); toast(snap ? t('모눈에 맞추지 않고 자유롭게 놓아요') : t('모눈에 맞춰 놓아요')) }} />
+  )
+}
+/** 맞춤선: 끌 때 다른 상자의 변·가운데와 줄이 맞으면 붙고 주황 선이 보인다 */
+function GuidesBig() {
+  const on = useSettings((s) => s.guides !== false)
+  return (
+    <Big icon={<Ruler {...BI} />} label={t('맞춤선')} on={on} tip={t('맞춤선 — 끌 때 다른 상자와 줄이 맞으면 붙어요 (Alt를 누르는 동안은 꺼져요)')}
+      onClick={() => { setSettings({ guides: !on }); toast(on ? t('맞춤선을 껐어요') : t('맞춤선을 켰어요')) }} />
   )
 }
 
@@ -457,21 +463,14 @@ function ArrangeTab({ ids }: { ids: string[] }) {
   return (
     <>
       <Grp label={t('맞춤')} off={n < 2}>
-        <Col>{ALIGNS.slice(0, 3).map((a) => <Small key={a.id} icon={a.icon} label={a.label} tip={t('{{side}} 맞춤', { side: a.label })} onClick={() => alignBoxes(a.id)} />)}</Col>
-        <Col>{ALIGNS.slice(3).map((a) => <Small key={a.id} icon={a.icon} label={a.label} tip={t('{{side}} 맞춤', { side: a.label })} onClick={() => alignBoxes(a.id)} />)}</Col>
+        <Col>{ALIGN_LIST.slice(0, 3).map((a) => <Small key={a.id} icon={<a.Icon {...SI} />} label={a.label} tip={t('{{side}} 맞춤', { side: a.label })} onClick={() => alignBoxes(a.id)} />)}</Col>
+        <Col>{ALIGN_LIST.slice(3).map((a) => <Small key={a.id} icon={<a.Icon {...SI} />} label={a.label} tip={t('{{side}} 맞춤', { side: a.label })} onClick={() => alignBoxes(a.id)} />)}</Col>
       </Grp>
       <Grp label={t('간격 똑같이')} off={n < 3}>
-        <Col>
-          <Small icon={<AlignHorizontalDistributeCenter {...SI} />} label={t('가로로')} tip={t('가로 간격 똑같이 (상자 3개 이상)')} onClick={() => distributeBoxes('h')} />
-          <Small icon={<AlignVerticalDistributeCenter {...SI} />} label={t('세로로')} tip={t('세로 간격 똑같이 (상자 3개 이상)')} onClick={() => distributeBoxes('v')} />
-        </Col>
+        <Col>{SPREAD_LIST.map((a) => <Small key={a.id} icon={<a.Icon {...SI} />} label={a.label} tip={a.tip} onClick={() => distributeBoxes(a.id)} />)}</Col>
       </Grp>
       <Grp label={t('같은 크기')} off={n < 2}>
-        <Col>
-          <Small icon={<StretchHorizontal {...SI} />} label={t('폭')} tip={t('가장 넓은 상자의 폭으로')} onClick={() => matchSize('w')} />
-          <Small icon={<StretchVertical {...SI} />} label={t('높이')} tip={t('가장 높은 상자의 높이로')} onClick={() => matchSize('h')} />
-          <Small icon={<Maximize2 {...SI} />} label={t('폭과 높이')} tip={t('가장 큰 상자의 크기로')} onClick={() => matchSize('both')} />
-        </Col>
+        <Col>{SIZE_LIST.map((a) => <Small key={a.id} icon={<a.Icon {...SI} />} label={a.label} tip={a.tip} onClick={() => matchSize(a.id)} />)}</Col>
       </Grp>
       <Grp label={t('순서')} off={!n}>
         <Big icon={<BringToFront {...BI} />} label={t('맨 앞으로')} onClick={() => reorder(true)} />
@@ -484,8 +483,9 @@ function ArrangeTab({ ids }: { ids: string[] }) {
           <Small icon={<Ungroup {...SI} />} label={t('꺼내기')} tip={t('집합에서 꺼내기')} disabled={!inSet} onClick={() => takeOut(ids)} />
         </Col>
       </Grp>
-      <Grp label={t('모눈')}>
+      <Grp label={t('맞추기')}>
         <SnapBig />
+        <GuidesBig />
       </Grp>
     </>
   )
@@ -536,8 +536,9 @@ function ViewTab() {
         </Pop>
         <Big icon={dark ? <Sun {...BI} /> : <Moon {...BI} />} label={t('다크 모드')} on={dark} tip={dark ? t('이 노트 다크 모드 끄기') : t('이 노트 다크 모드 켜기')} onClick={toggleDark} />
       </Grp>
-      <Grp label={t('모눈')}>
+      <Grp label={t('맞추기')}>
         <SnapBig />
+        <GuidesBig />
       </Grp>
       <Grp label={t('용지')}>
         <Col>{PAPERS.map((p) => <Small key={p.id} icon={p.icon} label={p.label} on={paperKind(paper) === p.id} onClick={() => choosePaper(p.id)} />)}</Col>

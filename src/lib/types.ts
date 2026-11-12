@@ -57,6 +57,8 @@ export type EdgeData = {
   rel?: Rel | null
   /** 되먹임 선이 다른 상자를 비켜 돌아가는 거리(꺾은선) */
   offset?: number
+  /** 꺾은 점 (캔버스 좌표). 있으면 선은 양 끝과 이 점들을 곧게 잇는다 */
+  points?: { x: number; y: number }[] | null
 }
 
 /** 새 상자·선을 만들 때 쓰는 기본 모양 (전체 설정, 또는 노트별) */

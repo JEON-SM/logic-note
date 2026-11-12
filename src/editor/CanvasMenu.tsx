@@ -4,14 +4,17 @@ import { useRef, useState, type MouseEvent, type PointerEvent, type ReactElement
 import { useReactFlow, type XYPosition } from '@xyflow/react'
 import { ContextMenu } from 'radix-ui'
 import {
-  BoxSelect, ClipboardPaste, Copy, Group, LogIn, LogOut, Scaling, Scissors, Square, StickyNote, Tag, Trash2, NotebookPen,
+  AlignStartVertical, BoxSelect, ChevronRight, ClipboardPaste, Copy, Eraser, Group, LogIn, LogOut, Scaling, Scissors, Square, StickyNote, Tag, Trash2,
+  NotebookPen, Waypoints,
 } from 'lucide-react'
 import { hierarchy, rectOf } from '../lib/sets'
 import { CItem, CSep, backToBox } from '../ui/kit'
 import { toast } from '../ui/Toast'
 import {
-  CLIP_MARK, addBox, copySelection, effDefaults, cutSelection, groupSelection, hasClip, pasteClip, patchNodes, selectedNodes, startEditing, takeOut, useEd,
+  CLIP_MARK, addBend, addBox, alignBoxes, clearBends, copySelection, distributeBoxes, effDefaults, cutSelection, groupSelection, hasClip, matchSize, pasteClip,
+  patchNodes, selectedNodes, startEditing, takeOut, useEd,
 } from './store'
+import { ALIGN_LIST, SIZE_LIST, SPREAD_LIST } from './aligns'
 import { deletePort } from './ports'
 import { t } from '../lib/i18n'
 
@@ -131,15 +134,36 @@ function NodeItems() {
       <CItem icon={<Group size={15} />} hint="Ctrl+G" onSelect={groupSelection}>{t('집합으로 묶기')}</CItem>
       {inSet && <CItem icon={<LogOut size={15} />} hint="Ctrl+Shift+G" onSelect={() => takeOut(ids)}>{t('집합에서 꺼내기')}</CItem>}
       <CItem icon={<Scaling size={15} />} onSelect={() => patchNodes(ids, { w: null, h: null, wrap: null })}>{t('크기를 글에 맞추기')}</CItem>
+      {ids.length > 1 && (
+        <ContextMenu.Sub>
+          <ContextMenu.SubTrigger className="menu-item">
+            <span className="menu-icon"><AlignStartVertical size={15} /></span>
+            <span className="menu-text">{t('맞춤')}</span>
+            <ChevronRight size={14} className="menu-check" />
+          </ContextMenu.SubTrigger>
+          <ContextMenu.Portal>
+            <ContextMenu.SubContent className="menu" sideOffset={4} collisionPadding={8}>
+              {ALIGN_LIST.map((a) => <CItem key={a.id} icon={<a.Icon size={15} />} onSelect={() => alignBoxes(a.id)}>{t('{{side}} 맞춤', { side: a.label })}</CItem>)}
+              {ids.length > 2 && <CSep />}
+              {ids.length > 2 && SPREAD_LIST.map((a) => <CItem key={a.id} icon={<a.Icon size={15} />} onSelect={() => distributeBoxes(a.id)}>{a.tip}</CItem>)}
+              <CSep />
+              {SIZE_LIST.map((a) => <CItem key={a.id} icon={<a.Icon size={15} />} onSelect={() => matchSize(a.id)}>{a.tip}</CItem>)}
+            </ContextMenu.SubContent>
+          </ContextMenu.Portal>
+        </ContextMenu.Sub>
+      )}
     </>
   )
 }
 
 function EdgeItems({ id }: { id: string }) {
   const rf = useReactFlow()
+  const bent = useEd((s) => !!s.edges.find((e) => e.id === id)?.data?.points?.length)
   return (
     <>
       <CItem icon={<Tag size={15} />} onSelect={() => useEd.setState({ editingEdge: id })}>{t('라벨 쓰기')}</CItem>
+      <CItem icon={<Waypoints size={15} />} onSelect={() => addBend([id])}>{t('꺾은 점 더하기')}</CItem>
+      {bent && <CItem icon={<Eraser size={15} />} onSelect={() => clearBends([id])}>{t('꺾은 점 모두 지우기')}</CItem>}
       <CItem icon={<Trash2 size={15} />} hint="Del" danger onSelect={() => rf.deleteElements({ edges: [{ id }] })}>{t('선 삭제')}</CItem>
     </>
   )

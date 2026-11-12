@@ -434,6 +434,18 @@ mark.hl { background: var(--hl); color: inherit; border-radius: 2px; padding: 0 
 /* 끌어서 옮기는 연결점 (크기를 바꾸면 선 끝이 어긋나므로 자석은 그림자로만 보인다) */
 .react-flow__handle.h.port.moving { opacity: 1; background: var(--accent); transition: box-shadow 0.09s ease-out; }
 .react-flow__handle.h.port.moving.snapped { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 35%, transparent); }
+/* 맞춤선: 끌 때 다른 상자의 변·가운데와 줄이 맞는 곳 */
+.guide { position: absolute; left: 0; top: 0; z-index: 1000; pointer-events: none; background: var(--accent); }
+/* 선의 꺾은 점: 고른 선의 구간 가운데 작은 점(끌면 꺾임)과 꺾은 점(끌어 옮김, 두 번 누르면 지움). 확대해도 같은 크기 */
+.bend, .bend-add, .bend-deg { position: absolute; left: 0; top: 0; z-index: 1001; transform-origin: 0 0; }
+.bend, .bend-add { pointer-events: all; touch-action: none; border-radius: 50%; }
+.bend { width: 11px; height: 11px; background: var(--panel); border: 2px solid var(--accent); cursor: move; }
+.bend-add { width: 9px; height: 9px; background: color-mix(in srgb, var(--accent) 35%, var(--panel)); border: 1.5px solid var(--panel); box-shadow: 0 0 0 1px var(--accent); cursor: crosshair; opacity: 0.85; }
+.bend:hover, .bend-add:hover { background: var(--accent); opacity: 1; }
+.bend-deg {
+  pointer-events: none; padding: 2px 6px; border-radius: 5px; background: var(--accent); color: #fff;
+  font-size: 12px; font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+}
 /* 크기 손잡이 (React Flow NodeResizer): 기능만 두고 보이지 않게. 선택 표시는 도형을 따라가는 .box-halo */
 .react-flow__resize-control.rs-h { width: 14px; height: 14px; background: transparent; border: 0; }
 .react-flow__resize-control.rs-l { border-color: transparent; }

@@ -6,7 +6,7 @@ import {
   AlignCenter, AlignLeft, AlignRight, AlignVerticalJustifyCenter, AlignVerticalJustifyEnd, AlignVerticalJustifyStart, Baseline, Bold, BoxSelect,
   CornerDownRight, Copy, Film, Hand, Highlighter, ImagePlus, Italic, LayoutTemplate, Link2, List, ListChecks, ListOrdered, MoreHorizontal,
   Paintbrush, PaintBucket, Spline, Square, SquarePlus, Strikethrough, Tag, Trash2, Type, Underline, GitBranchPlus, Eye, EyeOff, Group, Ungroup,
-  Palette, StickyNote, NotebookPen, Scaling, LogIn,
+  Palette, StickyNote, NotebookPen, Scaling, LogIn, AlignStartVertical, Waypoints, Eraser,
 } from 'lucide-react'
 import { HIGHLIGHTS } from '../lib/color'
 import { pickFiles } from '../lib/media'
@@ -17,7 +17,8 @@ import { ColorButton, IB, Item, Menu, MenuSep, Pop, RelIcon, Sep, ShapeIcon, cls
 import { addChild, insertFiles, insertLink } from './actions'
 import { startPicking } from './CanvasMenu'
 import { openDefaults } from './DefaultsDialog'
-import { copySelection, fmt, groupSelection, pasteClip, patchEdges, patchNodes, pickLook, takeOut, useEd } from './store'
+import { addBend, alignBoxes, clearBends, copySelection, distributeBoxes, fmt, groupSelection, matchSize, pasteClip, patchEdges, patchNodes, pickLook, takeOut, useEd } from './store'
+import { ALIGN_LIST, SIZE_LIST, SPREAD_LIST } from './aligns'
 import { t } from '../lib/i18n'
 
 /** 모양 바꾸기: 줄 메모지는 메모지 + 줄 서식 */
@@ -211,6 +212,7 @@ function NodeTools({ ids }: { ids: string[] }) {
         <Item icon={<ListChecks size={16} />} onSelect={() => fmt((c) => c.toggleTaskList())}>{t('체크리스트')}</Item>
       </Menu>
       <Painter />
+      {ids.length > 1 && <AlignMenu n={ids.length} />}
       <Sep />
       <IB label={t('이미지 넣기')} onClick={async () => insertFiles(await pickFiles('image/*'))}><ImagePlus {...S} /></IB>
       <IB label={t('링크 넣기')} onClick={() => insertLink()}><Link2 {...S} /></IB>
@@ -230,6 +232,19 @@ function NodeTools({ ids }: { ids: string[] }) {
       </Menu>
       <IB label={t('삭제')} onClick={() => rf.deleteElements({ nodes: ids.map((id) => ({ id })) })}><Trash2 {...S} /></IB>
     </>
+  )
+}
+
+/** 여러 상자를 골랐을 때: 맞춤 · 간격 똑같이(3개 이상) · 같은 크기 */
+function AlignMenu({ n }: { n: number }) {
+  return (
+    <Menu trigger={<IB label={t('맞춤 (여러 상자)')}><AlignStartVertical {...S} /></IB>}>
+      {ALIGN_LIST.map((a) => <Item key={a.id} icon={<a.Icon size={16} />} onSelect={() => alignBoxes(a.id)}>{t('{{side}} 맞춤', { side: a.label })}</Item>)}
+      {n > 2 && <MenuSep />}
+      {n > 2 && SPREAD_LIST.map((a) => <Item key={a.id} icon={<a.Icon size={16} />} onSelect={() => distributeBoxes(a.id)}>{a.tip}</Item>)}
+      <MenuSep />
+      {SIZE_LIST.map((a) => <Item key={a.id} icon={<a.Icon size={16} />} onSelect={() => matchSize(a.id)}>{a.tip}</Item>)}
+    </Menu>
   )
 }
 
@@ -273,11 +288,14 @@ function EdgeTools({ ids }: { ids: string[] }) {
   const rf = useReactFlow()
   const d = { ...defaultEdge(), ...useEd((s) => s.edges.find((e) => e.id === ids[0])?.data) }
   const set = (p: Partial<EdgeData>) => patchEdges(ids, p)
+  const bent = !!d.points?.length
   return (
     <>
-      <IB label={t('곡선')} on={d.kind === 'bezier'} onClick={() => set({ kind: 'bezier' })}><Spline {...S} /></IB>
-      <IB label={t('직선')} on={d.kind === 'straight'} onClick={() => set({ kind: 'straight' })}><LineIcon /></IB>
-      <IB label={t('꺾은선')} on={d.kind === 'step'} onClick={() => set({ kind: 'step' })}><CornerDownRight {...S} /></IB>
+      <IB label={t('곡선')} on={!bent && d.kind === 'bezier'} onClick={() => set({ kind: 'bezier', points: null })}><Spline {...S} /></IB>
+      <IB label={t('직선')} on={!bent && d.kind === 'straight'} onClick={() => set({ kind: 'straight', points: null })}><LineIcon /></IB>
+      <IB label={t('꺾은선')} on={!bent && d.kind === 'step'} onClick={() => set({ kind: 'step', points: null })}><CornerDownRight {...S} /></IB>
+      <IB label={t('꺾은 점 더하기 (고른 선 가운데의 작은 점을 끌어도 돼요)')} on={bent} onClick={() => addBend(ids)}><Waypoints {...S} /></IB>
+      {bent && <IB label={t('꺾은 점 모두 지우기')} onClick={() => clearBends(ids)}><Eraser {...S} /></IB>}
       <Sep />
       <IB label={t('화살표')} on={d.arrow === 'end'} onClick={() => set({ arrow: 'end' })}><LineIcon arrow="end" /></IB>
       <IB label={t('양방향')} on={d.arrow === 'both'} onClick={() => set({ arrow: 'both' })}><LineIcon arrow="both" /></IB>

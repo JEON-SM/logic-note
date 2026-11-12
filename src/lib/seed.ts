@@ -4,8 +4,8 @@ import { t } from './i18n'
 import { MEMO, defaultBox, defaultEdge } from './shapes'
 import type { BoxData, BoxNode, EdgeData, LogicEdge, Note } from './types'
 
-/** 둘러보기 판. 올리면 예전 둘러보기를 새것으로 바꾼다 (예전 것은 휴지통에) */
-const TOUR = 2
+/** 둘러보기 판. 1 이하에서 올리면 예전 둘러보기를 새것으로 바꾸고(예전 것은 휴지통에), 2에서는 아래 글 상자만 고친다 */
+const TOUR = 3
 
 const hl = (text: string, c: string) => {
   const a = highlightAttrs(c)
@@ -21,6 +21,15 @@ const box = (id: string, x: number, y: number, w: number, h: number, d: Partial<
 const link = (source: string, sh: string, target: string, th: string, d: Partial<EdgeData> = {}): LogicEdge => ({
   id: `${source}-${target}`, type: 'logic', source, sourceHandle: sh, target, targetHandle: th, data: { ...defaultEdge(), ...d },
 })
+
+/** 아래 글 상자: 배치 탭, 맞춤선, 선 꺾기 */
+const arrangeBox = () => box('arrange', -240, 240, 552, 144, {
+  dash: 'none',
+  body: p('배치 탭: 맞춤 · 간격 똑같이 · 같은 크기 · 맨 앞으로') + p('상자를 끌면 다른 상자와 줄이 맞을 때 주황 맞춤선이 보여요')
+    + p('선을 고르고 가운데 점을 끌면 꺾여요 (90°·270°에 붙고 각도 표시)') + p('모눈에 맞추기·맞춤선은 배치·보기 탭에서 켜고 꺼요 (Alt: 반대로)'),
+})
+/** 2판의 아래 글 상자 (고치지 않았으면 3판으로 바꾼다) */
+const arrangeV2 = () => p('배치 탭: 맞춤 · 간격 똑같이 · 같은 크기 · 맨 앞으로') + p('모눈에 맞추기는 배치·보기 탭에서 켜고 꺼요 (Alt: 반대로)')
 
 /** 새 기능을 한 장에: 왼쪽 사용법, 가운데 상자 안의 예시, 오른쪽 리본·단축키·무늬 */
 function tour(): Pick<Note, 'title' | 'bg' | 'nodes' | 'edges'> {
@@ -42,9 +51,7 @@ function tour(): Pick<Note, 'title' | 'bg' | 'nodes' | 'edges'> {
       box('c', -84, -48, 168, 96, { ...set, shape: 'diamond', body: p('타당한가?') }),
       box('d', -96, 120, 192, 72, { ...set, head: true, fill: '#DDF3E4', stroke: '#30A46C', body: p('결론') + `<p>${t('소크라테스는')} ${hl(t('죽는다'), '#FFF176')}</p>` }),
       box('e', 156, -36, 144, 72, { ...set, shape: 'ellipse', dash: 'dashed', body: p('다시 검토') }),
-      box('arrange', -240, 240, 552, 72, {
-        dash: 'none', body: p('배치 탭: 맞춤 · 간격 똑같이 · 같은 크기 · 맨 앞으로') + p('모눈에 맞추기는 배치·보기 탭에서 켜고 꺼요 (Alt: 반대로)'),
-      }),
+      arrangeBox(),
       box('ribbon', 360, -240, 264, 192, {
         head: true, valign: 'top', fill: '#DCEEFF', stroke: '#0090FF',
         body: L('리본') + list(['빠른 도구: 고른 것에 따라 바뀌는 한 줄', '홈 · 삽입 · 상자 · 선 · 배치 · 보기', '서식 복사: 한 상자의 모양을 다른 상자에', 'Ctrl+F1: 리본 접기·펼치기']),
@@ -75,9 +82,11 @@ function tour(): Pick<Note, 'title' | 'bg' | 'nodes' | 'edges'> {
  * 예전 둘러보기가 있으면 새 판으로 바꾸고, 예전 것은 휴지통에 넣어 둔다 (되살릴 수 있게)
  */
 export async function seedIfEmpty() {
-  if (+(localStorage.getItem('ln.tour') ?? 0) >= TOUR) return
+  const v = +(localStorage.getItem('ln.tour') ?? 0)
+  if (v >= TOUR) return
   const seeded = localStorage.getItem('ln.seeded'), count = await db.notes.count()
   localStorage.setItem('ln.tour', String(TOUR))
+  if (v === 2) return patchTour()
   localStorage.setItem('ln.seeded', '1')
   const now = Date.now()
   if (!seeded && !count) {
@@ -92,4 +101,14 @@ export async function seedIfEmpty() {
     ...old, ...tour(), updatedAt: now, dirty: 1,
     viewport: undefined, dots: undefined, ground: null, mode: null, paper: null, defaults: null,
   })
+}
+
+/** 2판 둘러보기: 아래 글 상자를 고치지 않았으면 새 기능(맞춤선·선 꺾기)을 적은 글로 바꾼다 */
+async function patchTour() {
+  const n = await db.notes.get('welcome')
+  if (!n || n.deleted || n.trashed) return
+  const i = n.nodes.findIndex((x) => x.id === 'arrange' && x.data.body === arrangeV2())
+  if (i < 0) return
+  const nodes = n.nodes.map((x, k) => (k === i ? { ...arrangeBox(), data: { ...arrangeBox().data, ports: x.data.ports } } : x))
+  await db.notes.put({ ...n, nodes, updatedAt: Date.now(), dirty: 1 })
 }

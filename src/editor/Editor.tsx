@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react'
 import {
-  Background, BackgroundVariant, ConnectionLineType, ConnectionMode, ReactFlow, ReactFlowProvider, SelectionMode, reconnectEdge, useReactFlow, useStore,
+  Background, BackgroundVariant, ConnectionLineType, ConnectionMode, ReactFlow, ReactFlowProvider, SelectionMode, ViewportPortal, reconnectEdge, useReactFlow, useStore,
   type Connection, type FinalConnectionState, type Viewport,
 } from '@xyflow/react'
 import { useShallow } from 'zustand/react/shallow'
@@ -29,7 +29,7 @@ import { usePortMoving, usePortPlacing } from './ports'
 import {
   CLIP_MARK, addBox, addLink, canHold, commit, copySelection, cutSelection, dragOver, drawBox, effDefaults, finishDrag, flushSave, fmt, groupSelection, hasClip,
   loadNote, moveInto, notePointer, nudge, onEdgesChange, onNodesChange, paintOnto, paperKind, pasteClip, redo, selectOnly, selectToward, setFree, setPageSide, setPaper,
-  snapCenter, snapXY, startDrag, startEditing, stopEditing, takeOut, undo, useEd, useLook, type PaperKind,
+  clearGuides, drawSnap, setViewZoom, snapCenter, startDrag, startEditing, stopEditing, takeOut, undo, useEd, useLook, type PaperKind,
 } from './store'
 import { t } from '../lib/i18n'
 
@@ -346,16 +346,19 @@ function Canvas({ id, viewport }: { id: string; viewport?: Viewport }) {
     drawingRef.current = true
     const x0 = e.clientX, y0 = e.clientY, shape = place ? s.shape : effDefaults().shape
     let moved = false
-    const flowRect = (x1: number, y1: number) => {
-      const a = snapXY(toFlow(Math.min(x0, x1), Math.min(y0, y1))), b = snapXY(toFlow(Math.max(x0, x1), Math.max(y0, y1)))
-      return { x: a.x, y: a.y, w: Math.max(24, b.x - a.x), h: Math.max(24, b.y - a.y) }
+    /** 화면에서 끈 그대로의 사각형 (캔버스 좌표) */
+    const rawRect = (x1: number, y1: number) => {
+      const a = toFlow(Math.min(x0, x1), Math.min(y0, y1)), b = toFlow(Math.max(x0, x1), Math.max(y0, y1))
+      return { x: a.x, y: a.y, w: b.x - a.x, h: b.y - a.y }
     }
-    // 그리는 동안은 윈도우 선택 상자처럼 마우스를 그대로 따라간다 (모눈 맞춤은 놓을 때)
+    // 그리는 동안은 윈도우 선택 상자처럼 마우스를 그대로 따라간다. 변이 다른 상자의 변·가운데에 가까우면 붙고 맞춤선이 보인다
+    // (모눈 맞춤은 놓을 때)
     const move = (ev: PointerEvent) => {
       setFree(ev.altKey)
       if (!moved && Math.hypot(ev.clientX - x0, ev.clientY - y0) < 5) return
       moved = true
-      setDraft({ x: Math.min(x0, ev.clientX), y: Math.min(y0, ev.clientY), w: Math.abs(ev.clientX - x0), h: Math.abs(ev.clientY - y0) })
+      const r = drawSnap(rawRect(ev.clientX, ev.clientY), false), p = rf.flowToScreenPosition({ x: r.x, y: r.y }), z = rf.getZoom()
+      setDraft({ x: p.x, y: p.y, w: r.w * z, h: r.h * z })
     }
     const swallow = (ev: Event) => { ev.stopPropagation(); ev.preventDefault() }
     const up = (ev: PointerEvent) => {
@@ -363,11 +366,12 @@ function Canvas({ id, viewport }: { id: string; viewport?: Viewport }) {
       removeEventListener('pointerup', up, true)
       drawingRef.current = false
       setDraft(null)
+      clearGuides()
       if (!moved && !place) return
       // 그린 뒤 따라오는 클릭이 방금 만든 상자의 선택을 풀지 않게
       addEventListener('click', swallow, { capture: true, once: true })
       setTimeout(() => removeEventListener('click', swallow, { capture: true }), 0)
-      let r = flowRect(ev.clientX, ev.clientY)
+      let r = drawSnap(rawRect(ev.clientX, ev.clientY), true)
       if (!moved) {
         // 도형만 고르고 눌렀으면 그 자리에 기본 크기로
         const sz = boxSize(shape), c = snapCenter(toFlow(ev.clientX, ev.clientY), sz.w, sz.h)
@@ -452,6 +456,7 @@ function Canvas({ id, viewport }: { id: string; viewport?: Viewport }) {
         )}
         {!pattern && <Background variant={BackgroundVariant.Dots} gap={1000} size={0} bgColor={paper ? DESK[theme] : look.ground} />}
         {paper && <PagesLayer paper={paper} bg={bg} />}
+        <GuideLayer />
       </ReactFlow>
       {draft && <div className="draw-rect" style={{ left: draft.x, top: draft.y, width: draft.w, height: draft.h }} />}
       {!nodes.length && (
@@ -486,6 +491,24 @@ const ARROWS: Record<string, [number, number, 'l' | 'r' | 'u' | 'd']> = {
 
 /** 용지 노트에서 종이 바깥(책상) 색 */
 const DESK = { light: '#ECECE9', dark: '#0C0C0D' } as const
+
+/** 맞춤선: 끌거나 크기를 바꾸거나 그리는 동안 다른 상자와 줄이 맞는 곳에 주황 선 (확대해도 1px) */
+function GuideLayer() {
+  const guides = useEd((s) => s.guides)
+  const zoom = useStore((s) => s.transform[2])
+  useEffect(() => setViewZoom(zoom), [zoom])
+  if (!guides.length) return null
+  const w = 1 / zoom
+  return (
+    <ViewportPortal>
+      {guides.map((g, i) => (
+        <div key={i} className="guide" style={g.axis === 'x'
+          ? { transform: `translate(${g.at - w / 2}px, ${g.from}px)`, width: w, height: g.to - g.from }
+          : { transform: `translate(${g.from}px, ${g.at - w / 2}px)`, width: g.to - g.from, height: w }} />
+      ))}
+    </ViewportPortal>
+  )
+}
 
 function ZoomPanel() {
   const rf = useReactFlow()

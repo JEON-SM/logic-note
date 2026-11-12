@@ -59,11 +59,17 @@ interface S {
   rev: number
   /** 안에 상자가 있는 상자 (글을 위쪽에 둔다) */
   hosts: Set<string>
+  /** 끌거나 크기를 바꾸거나 그리는 동안 보이는 맞춤선 (다른 상자와 변·가운데가 맞는 곳) */
+  guides: Guide[]
+  /** 옮기고 있는 선의 꺾은 점 (각도를 보여 준다) */
+  bending: { edge: string; index: number } | null
 }
+/** 맞춤선: axis 'x'는 x = at 인 세로선(from~to는 y), 'y'는 가로선 */
+export interface Guide { axis: 'x' | 'y'; at: number; from: number; to: number }
 
 export const useEd = create<S>(() => ({
   noteId: '', title: '', bg: 'grid', ground: null, mode: null, paper: null, defaults: null, nodes: [], edges: [], dropTarget: null, picking: null, resizing: null, portDraft: null,
-  editingId: null, readyId: null, editingEdge: null, active: null, painter: null, hosts: new Set<string>(),
+  editingId: null, readyId: null, editingEdge: null, active: null, painter: null, hosts: new Set<string>(), guides: [], bending: null,
   tool: 'draw', shape: 'rect', edgeStyle: defaultEdge(), past: [], future: [], rev: 0,
 }))
 const get = useEd.getState
@@ -168,15 +174,88 @@ useEd.subscribe((s, p) => {
 
 // ── 실행 취소 ──
 export function commit() { set((s) => ({ past: [...s.past.slice(-99), snap()], future: [] })) }
+/** 실행 취소·다시 실행으로 되돌리는 중 (선의 꺾은 점을 상자와 함께 다시 옮기지 않게) */
+let restoring = false
 export function undo() {
   const p = get().past.at(-1)
   if (!p) return
+  restoring = true
   set((s) => ({ past: s.past.slice(0, -1), future: [...s.future, snap()], ...p, editingId: null, rev: bump() }))
+  restoring = false
 }
 export function redo() {
   const f = get().future.at(-1)
   if (!f) return
+  restoring = true
   set((s) => ({ future: s.future.slice(0, -1), past: [...s.past, snap()], ...f, editingId: null, rev: bump() }))
+  restoring = false
+}
+
+// ── 선의 꺾은 점: 양 끝 상자가 똑같이 움직이면(함께 끌기·맞춤·바깥 상자 옮기기) 꺾은 점도 따라간다 ──
+let carrying = false
+useEd.subscribe((s, p) => {
+  if (loading || restoring || carrying || s.nodes === p.nodes || s.noteId !== p.noteId) return
+  if (!s.edges.some((e) => e.data?.points?.length)) return
+  const before = new Map(p.nodes.map((n) => [n.id, n.position])), after = new Map(s.nodes.map((n) => [n.id, n.position]))
+  let changed = false
+  const edges = s.edges.map((e) => {
+    const pts = e.data?.points
+    if (!pts?.length) return e
+    const a0 = before.get(e.source), a1 = after.get(e.source), b0 = before.get(e.target), b1 = after.get(e.target)
+    if (!a0 || !a1 || !b0 || !b1) return e
+    const dx = a1.x - a0.x, dy = a1.y - a0.y
+    if ((!dx && !dy) || Math.abs(b1.x - b0.x - dx) > 0.01 || Math.abs(b1.y - b0.y - dy) > 0.01) return e
+    changed = true
+    return { ...e, data: { ...e.data!, points: pts.map((q) => ({ x: q.x + dx, y: q.y + dy })) } }
+  })
+  if (!changed) return
+  carrying = true
+  set({ edges })
+  carrying = false
+})
+/** 선의 꺾은 점들을 바꾼다 (끄는 동안에는 기록하지 않고, 누르는 순간 commit) */
+export function setBends(id: string, points: XYPosition[] | null, record = false) {
+  if (record) commit()
+  set((s) => ({ edges: s.edges.map((e) => (e.id === id ? { ...e, data: { ...defaultEdge(), ...e.data, points: points?.length ? points : null } } : e)), rev: s.rev + 1 }))
+}
+/** 선이 상자에 닿는 자리 (연결점이면 그 점, 아니면 그 변의 가운데) */
+function endOf(nodeId: string, handle: string | null | undefined): XYPosition | null {
+  const n = get().nodes.find((x) => x.id === nodeId)
+  if (!n) return null
+  const r = rectOf(n), port = n.data.ports?.find((p) => p.id === handle)
+  if (port) return { x: r.x + port.u * r.w, y: r.y + port.v * r.h }
+  return handle === 't' ? { x: r.x + r.w / 2, y: r.y } : handle === 'b' ? { x: r.x + r.w / 2, y: r.y + r.h }
+    : handle === 'l' ? { x: r.x, y: r.y + r.h / 2 } : { x: r.x + r.w, y: r.y + r.h / 2 }
+}
+/**
+ * 고른 선에 꺾은 점 하나를 더한다. 꺾은 점이 없는 선은 바로 직각(90°)으로 꺾이게,
+ * 이미 있으면 가장 긴 구간 가운데에 (끌어서 옮긴다)
+ */
+export function addBend(ids: string[]) {
+  const s = get(), edits = new Map<string, XYPosition[]>()
+  for (const e of s.edges) {
+    if (!ids.includes(e.id)) continue
+    // 선이 실제로 닿는 자리는 그려진 선에서 읽는다 (연결점 손잡이 크기만큼 어긋나지 않게)
+    const el = document.querySelector<SVGPathElement>(`.react-flow__edge[data-id="${CSS.escape(e.id)}"] .react-flow__edge-path`)
+    const len = el?.getTotalLength() ?? 0
+    const a = el && len ? el.getPointAtLength(0) : endOf(e.source, e.sourceHandle)
+    const b = el && len ? el.getPointAtLength(len) : endOf(e.target, e.targetHandle)
+    if (!a || !b) continue
+    const pts = e.data?.points ?? []
+    if (!pts.length) { edits.set(e.id, [Math.abs(b.x - a.x) > 1 && Math.abs(b.y - a.y) > 1 ? { x: b.x, y: a.y } : { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }]); continue }
+    const all = [a, ...pts, b]
+    let k = 0
+    for (let i = 1; i < all.length - 1; i++) if (Math.hypot(all[i + 1].x - all[i].x, all[i + 1].y - all[i].y) > Math.hypot(all[k + 1].x - all[k].x, all[k + 1].y - all[k].y)) k = i
+    edits.set(e.id, [...pts.slice(0, k), { x: (all[k].x + all[k + 1].x) / 2, y: (all[k].y + all[k + 1].y) / 2 }, ...pts.slice(k)])
+  }
+  if (!edits.size) return
+  commit()
+  set((st) => ({ edges: st.edges.map((e) => (edits.has(e.id) ? { ...e, data: { ...defaultEdge(), ...e.data, points: edits.get(e.id)! } } : e)), rev: st.rev + 1 }))
+}
+/** 고른 선의 꺾은 점을 모두 지워 다시 곧게 */
+export function clearBends(ids: string[]) {
+  if (!get().edges.some((e) => ids.includes(e.id) && e.data?.points?.length)) return
+  patchEdges(ids, { points: null })
 }
 
 // ── 모눈에 맞추기: 설정(모눈에 맞추기)으로 켜고 끈다. Alt를 누르고 있는 동안은 반대로 ──
@@ -201,16 +280,87 @@ export function snapCenter(c: XYPosition, w: number, h: number): XYPosition {
   const tl = snapXY({ x: c.x - w / 2, y: c.y - h / 2 })
   return { x: tl.x + w / 2, y: tl.y + h / 2 }
 }
-/** 크기를 바꾸는 중: 움직인 변만 모눈에 */
-function snapEdges(r: Rect, r0: Rect): Rect {
-  if (loose()) return r
+
+// ── 맞춤선 (파워포인트의 스마트 가이드): 다른 상자의 변·가운데와 가까우면 거기에 붙고 주황 선을 보여 준다 ──
+let viewZoom = 1
+/** 화면 확대 비율 (붙는 거리를 화면 기준 몇 px로 맞추려고) */
+export const setViewZoom = (z: number) => { viewZoom = z || 1 }
+/** 맞춤선을 쓰는지: 설정에서 끌 수 있고, Alt를 누르는 동안은 쓰지 않는다 */
+const guidesOn = () => useSettings.getState().guides !== false && !free
+/** 이만큼(화면 7px) 가까우면 붙는다 */
+export const near = () => 7 / viewZoom
+type Mark = { v: number; r: Rect }
+/** 맞출 수 있는 다른 상자들의 왼쪽·가운데·오른쪽(xs), 위·가운데·아래(ys) */
+function marks(skip: Set<string>) {
+  const xs: Mark[] = [], ys: Mark[] = []
+  for (const n of get().nodes) {
+    if (skip.has(n.id)) continue
+    const r = rectOf(n)
+    xs.push({ v: r.x, r }, { v: r.x + r.w / 2, r }, { v: r.x + r.w, r })
+    ys.push({ v: r.y, r }, { v: r.y + r.h / 2, r }, { v: r.y + r.h, r })
+  }
+  return { xs, ys }
+}
+/** 움직이는 쪽 좌표들(anchors) 가운데 다른 상자와 가장 가까운 것: 옮길 거리 d와 맞출 좌표 at */
+function closest(anchors: number[], list: Mark[], tol: number) {
+  let best: { d: number; at: number } | null = null
+  for (const a of anchors) for (const m of list) {
+    const d = m.v - a
+    if (Math.abs(d) <= tol && (!best || Math.abs(d) < Math.abs(best.d))) best = { d, at: m.v }
+  }
+  return best
+}
+/** 상자 r의 변·가운데가 다른 상자와 맞는 곳마다 선 하나 (맞는 상자들을 모두 지나도록) */
+function guideLines(r: Rect, xs: Mark[], ys: Mark[], only?: { x?: number[]; y?: number[] }): Guide[] {
+  const out: Guide[] = []
+  const add = (axis: 'x' | 'y', at: number, list: Mark[]) => {
+    const hit = list.filter((m) => Math.abs(m.v - at) < 0.5)
+    if (!hit.length || out.some((g) => g.axis === axis && Math.abs(g.at - at) < 0.5)) return
+    const all = [r, ...hit.map((m) => m.r)]
+    const from = Math.min(...all.map((q) => (axis === 'x' ? q.y : q.x))) - 10
+    const to = Math.max(...all.map((q) => (axis === 'x' ? q.y + q.h : q.x + q.w))) + 10
+    out.push({ axis, at, from, to })
+  }
+  for (const at of only?.x ?? [r.x, r.x + r.w / 2, r.x + r.w]) add('x', at, xs)
+  for (const at of only?.y ?? [r.y, r.y + r.h / 2, r.y + r.h]) add('y', at, ys)
+  return out
+}
+const sameGuides = (a: Guide[], b: Guide[]) => a.length === b.length && a.every((g, i) => g.axis === b[i].axis && g.at === b[i].at && g.from === b[i].from && g.to === b[i].to)
+const showGuides = (g: Guide[]) => { if (!sameGuides(g, get().guides)) set({ guides: g }) }
+export const clearGuides = () => { if (get().guides.length) set({ guides: [] }) }
+
+/** 크기를 바꾸는 중: 움직인 변만 다른 상자의 변·가운데(가까우면)나 모눈에 */
+function snapEdges(r: Rect, r0: Rect, id: string): { r: Rect; guides: Guide[] } {
+  const smart = guidesOn()
+  if (loose() && !smart) return { r, guides: [] }
+  const { descendants } = hierarchy(get().nodes)
+  const m = smart ? marks(new Set([id, ...descendants(id)])) : { xs: [], ys: [] }, tol = near()
   const a = snapXY({ x: r.x, y: r.y }), b = snapXY({ x: r.x + r.w, y: r.y + r.h })
+  const pick = (v: number, grid: number, list: Mark[]) => closest([v], list, tol)?.at ?? grid
   let L = r.x, T = r.y, R = r.x + r.w, B = r.y + r.h
-  if (Math.abs(L - r0.x) > 0.5) L = Math.min(a.x, R - 24)
-  if (Math.abs(T - r0.y) > 0.5) T = Math.min(a.y, B - 24)
-  if (Math.abs(R - (r0.x + r0.w)) > 0.5) R = Math.max(b.x, L + 24)
-  if (Math.abs(B - (r0.y + r0.h)) > 0.5) B = Math.max(b.y, T + 24)
-  return { x: L, y: T, w: R - L, h: B - T }
+  const mL = Math.abs(L - r0.x) > 0.5, mT = Math.abs(T - r0.y) > 0.5, mR = Math.abs(R - (r0.x + r0.w)) > 0.5, mB = Math.abs(B - (r0.y + r0.h)) > 0.5
+  if (mL) L = Math.min(pick(L, a.x, m.xs), R - 24)
+  if (mT) T = Math.min(pick(T, a.y, m.ys), B - 24)
+  if (mR) R = Math.max(pick(R, b.x, m.xs), L + 24)
+  if (mB) B = Math.max(pick(B, b.y, m.ys), T + 24)
+  const out = { x: L, y: T, w: R - L, h: B - T }
+  const xs = [...(mL ? [L] : []), ...(mR ? [R] : [])], ys = [...(mT ? [T] : []), ...(mB ? [B] : [])]
+  return { r: out, guides: smart ? guideLines(out, m.xs, m.ys, { x: xs, y: ys }) : [] }
+}
+
+/**
+ * 끌어서 그리는 사각형(마우스를 따라가는 그대로의 크기)을 맞춘다: 네 변이 다른 상자의 변·가운데와 가까우면 붙고 맞춤선을 보여 준다.
+ * final이면(놓을 때) 붙지 않은 변은 모눈에 맞추고 선을 지운다
+ */
+export function drawSnap(r: Rect, final: boolean): Rect {
+  const smart = guidesOn(), m = smart ? marks(new Set()) : { xs: [], ys: [] }, tol = near()
+  const a = final ? snapXY({ x: r.x, y: r.y }) : r, b = final ? snapXY({ x: r.x + r.w, y: r.y + r.h }) : { x: r.x + r.w, y: r.y + r.h }
+  const pick = (v: number, grid: number, list: Mark[]) => closest([v], list, tol)?.at ?? grid
+  const L = pick(r.x, a.x, m.xs), T = pick(r.y, a.y, m.ys)
+  const R = Math.max(L + 24, pick(r.x + r.w, b.x, m.xs)), B = Math.max(T + 24, pick(r.y + r.h, b.y, m.ys))
+  const out = { x: L, y: T, w: R - L, h: B - T }
+  showGuides(final || !smart ? [] : guideLines(out, m.xs, m.ys, { x: [L, R], y: [T, B] }))
+  return out
 }
 let resizeFrom: { id: string; rect: Rect } | null = null
 export function beginResize(id: string) {
@@ -221,7 +371,7 @@ export function beginResize(id: string) {
 }
 export function endResize(id: string) {
   resizeFrom = null
-  set({ resizing: null })
+  set({ resizing: null, guides: [] })
   settleKids(id)
 }
 
@@ -231,13 +381,14 @@ export function onNodesChange(changes: NodeChange<BoxNode>[]) {
   // 크기 손잡이(NodeResizer): 폭·높이는 상자 자료로, 움직인 변은 모눈에 맞춘다
   const sized = new Map<string, { w: number; h: number }>()
   const center = new Map<string, XYPosition>()
+  let guides: Guide[] | null = null
   for (const c of changes) {
     if (c.type !== 'dimensions' || !c.setAttributes || !c.dimensions) continue
     const n = byId.get(c.id)
     if (!n) continue
     const at = (changes.find((x) => x.type === 'position' && x.id === c.id && x.position) as { position: XYPosition } | undefined)?.position ?? n.position
     let r: Rect = { x: at.x - c.dimensions.width / 2, y: at.y - c.dimensions.height / 2, w: c.dimensions.width, h: c.dimensions.height }
-    if (resizeFrom?.id === c.id) r = snapEdges(r, resizeFrom.rect)
+    if (resizeFrom?.id === c.id) { const sn = snapEdges(r, resizeFrom.rect, c.id); r = sn.r; guides = sn.guides }
     sized.set(c.id, { w: Math.round(r.w), h: Math.round(r.h) })
     center.set(c.id, { x: r.x + r.w / 2, y: r.y + r.h / 2 })
   }
@@ -246,17 +397,27 @@ export function onNodesChange(changes: NodeChange<BoxNode>[]) {
     if (c.type === 'position' && center.has(c.id)) return { ...c, position: center.get(c.id) }
     return c
   })
-  // 끄는 중(그리고 놓는 순간): 앞장선 상자의 왼쪽 위를 모눈에 맞추고, 함께 끄는 상자도 같은 만큼.
+  // 끄는 중(그리고 놓는 순간): 함께 끄는 상자 전체가 다른 상자의 변·가운데와 가까우면 거기에 붙고(맞춤선),
+  // 아니면 앞장선 상자의 왼쪽 위를 모눈에 맞춘다. 함께 끄는 상자는 모두 같은 만큼 옮긴다.
   // React Flow는 놓을 때 맞추기 전 자리를 한 번 더 보내므로(dragging: false) 그것도 맞춘다
   const isDrag = (c: NodeChange<BoxNode>) => c.type === 'position' && typeof c.dragging === 'boolean' && !!c.position && !center.has(c.id)
-  const drags = ch.filter(isDrag) as { id: string; position: XYPosition }[]
-  if (drags.length && !loose()) {
-    const lead = byId.get(drags[0].id)
-    if (lead) {
-      const r = rectOf(lead), p = drags[0].position, to = snapCenter(p, r.w, r.h)
-      const dx = to.x - p.x, dy = to.y - p.y
-      if (dx || dy) ch = ch.map((c) => (isDrag(c) && c.type === 'position' ? { ...c, position: { x: c.position!.x + dx, y: c.position!.y + dy } } : c))
+  const drags = ch.filter(isDrag) as { id: string; position: XYPosition; dragging?: boolean }[]
+  const lead = drags.length ? byId.get(drags[0].id) : undefined
+  if (lead) {
+    const rs = drags.flatMap((c) => { const n = byId.get(c.id); if (!n) return []; const r = rectOf(n); return [{ x: c.position.x - r.w / 2, y: c.position.y - r.h / 2, w: r.w, h: r.h }] })
+    const u = unionRect(rs)
+    let dx = 0, dy = 0
+    if (!loose()) { const r = rectOf(lead), p = drags[0].position, to = snapCenter(p, r.w, r.h); dx = to.x - p.x; dy = to.y - p.y }
+    const smart = guidesOn(), m = smart ? marks(draggedIds.size ? draggedIds : new Set(drags.map((c) => c.id))) : null
+    if (m) {
+      const tol = near()
+      const sx = closest([u.x, u.x + u.w / 2, u.x + u.w], m.xs, tol), sy = closest([u.y, u.y + u.h / 2, u.y + u.h], m.ys, tol)
+      if (sx) dx = sx.d
+      if (sy) dy = sy.d
+      // 놓는 순간에는 선을 지운다
+      guides = drags.some((c) => c.dragging) ? guideLines({ ...u, x: u.x + dx, y: u.y + dy }, m.xs, m.ys) : []
     }
+    if (dx || dy) ch = ch.map((c) => (isDrag(c) && c.type === 'position' ? { ...c, position: { x: c.position!.x + dx, y: c.position!.y + dy } } : c))
   }
   const content = ch.some((c) => c.type !== 'select' && c.type !== 'dimensions') || sized.size > 0
   set((st) => {
@@ -283,7 +444,7 @@ export function onNodesChange(changes: NodeChange<BoxNode>[]) {
       const up = (p: string | null | undefined): string | null => (p && removed.has(p) ? up(removed.get(p)) : p ?? null)
       nodes = nodes.map((n) => (n.data.parent && removed.has(n.data.parent) ? { ...n, data: { ...n.data, parent: up(n.data.parent) } } : n))
     }
-    return { nodes, rev: content ? st.rev + 1 : st.rev }
+    return { nodes, rev: content ? st.rev + 1 : st.rev, ...(guides && !sameGuides(guides, st.guides) && { guides }) }
   })
 }
 export function onEdgesChange(ch: EdgeChange<LogicEdge>[]) {
@@ -331,7 +492,9 @@ export function addBox(position: XYPosition, shape0: Shape, patch: Partial<BoxDa
 /** 끌어서 그린 사각형으로 상자를 만들고 바로 글을 쓴다. 다른 상자 안에 완전히 들어가면 그 상자 안으로 */
 export function drawBox(r: Rect, shape: Shape) {
   const parent = boxAround(get().nodes, r)
-  const id = addBox({ x: r.x + r.w / 2, y: r.y + r.h / 2 }, shape, { w: Math.round(r.w), h: Math.round(r.h), parent }, { pop: false, snap: false })
+  // 크기를 반올림한 뒤 가운데를 정해 왼쪽 위 모서리가 맞춘 자리(모눈·맞춤선)에 그대로 놓이게
+  const w = Math.round(r.w), h = Math.round(r.h)
+  const id = addBox({ x: r.x + w / 2, y: r.y + h / 2 }, shape, { w, h, parent }, { pop: false, snap: false })
   startEditing(id, undefined, false)
   return id
 }
@@ -387,6 +550,7 @@ export function dragOver(id: string) {
 /** 놓을 때: 함께 끈 상자 중 가장 바깥 것들을 표시된 상자 안으로 (빈 곳이면 밖으로) */
 export function finishDrag(ids: string[]) {
   dragging = false
+  clearGuides()
   const s = get()
   const { parentOf } = hierarchy(s.nodes)
   const moved = new Set(ids)
